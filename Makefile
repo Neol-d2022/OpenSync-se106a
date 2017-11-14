@@ -3,8 +3,8 @@ CC=gcc
 CFLAGS=-Wall -Wextra -g3
 LFLAGS=
 
-OBJS=main.o mm.o mm_test.o
-DEPS=mm.h mm_test.h
+OBJS=main.o mm.o mm_test.o strings.o strings_test.o
+DEPS=mm.h mm_test.h strings.h strings_test.h
 LIBS=
 
 BIN=OpenSync

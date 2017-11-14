@@ -1,10 +1,13 @@
 #include <stdio.h>
 
 #include "mm_test.h"
+#include "strings_test.h"
 
 int selfTest(void)
 {
     if (mm_test())
+        return 1;
+    if (strings_test())
         return 1;
 }
 
