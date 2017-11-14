@@ -37,7 +37,9 @@ void *Mrealloc(void *p, size_t s)
 void Mfree(void *p)
 {
     free(p);
-    _gAllocationCount -= 1;
+
+    if (p)
+        _gAllocationCount -= 1;
 }
 
 size_t MDebug()

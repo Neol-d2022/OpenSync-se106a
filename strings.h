@@ -1,6 +1,9 @@
 #ifndef _STRINGS_H_LOADED
 #define _STRINGS_H_LOADED
 
+/* size_t */
+#include <stddef.h>
+
 /* Duplicate string str. Must be released by call to Mfree(). */
 char *SDup(const char *str);
 
