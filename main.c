@@ -2,6 +2,7 @@
 
 #include "mm_test.h"
 #include "strings_test.h"
+#include "filetree_test.h"
 
 int selfTest(void)
 {
@@ -9,6 +10,9 @@ int selfTest(void)
         return 1;
     if (strings_test())
         return 1;
+    if (filetree_test())
+        return 1;
+    return 0;
 }
 
 int main(void)
