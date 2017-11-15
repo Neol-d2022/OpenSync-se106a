@@ -7,8 +7,12 @@
 /* size_t */
 #include <stddef.h>
 
+/* time_t */
+#include <time.h>
+
 typedef struct
 {
+    time_t timeLastModification;
     uint32_t crc32;
 } FileNodeTypeFile_t;
 

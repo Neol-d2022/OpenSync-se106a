@@ -9,6 +9,7 @@
 #include "mm.h"
 #include "strings.h"
 #include "transformcontainer.h"
+#include "crc32.h"
 
 #ifdef _WIN32
 #define kPathSeparator '\\'
@@ -25,7 +26,7 @@
 static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs);
 static char *_PathConcat(const char *parent, const char *filename);
 static int _IsPathSeparator(const char *c);
-static int _GetFileType(const char *fullPath, int *result);
+static int _GetFileStat(const char *fullPath, int *result, time_t *timeLastModification);
 static void _DestoryFileNode(FileNode_t *fn);
 static void _PrintFileNode(FileNode_t *fn, size_t depth);
 
@@ -88,12 +89,15 @@ void FileTreeDebugPrint(FileTree_t *t)
 static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
 {
     TC_t DIRs, SubDIR;
+    time_t mtime;
     FileNode_t *fn;
     DIR *dirp;
     struct dirent *dp;
     char *fileFullPath;
     size_t i, j, n;
+    FILE *f;
     int r = 0, s, ft;
+    uint32_t crc32;
 
     TCInit(&DIRs);
     dirp = opendir(fullPath);
@@ -109,15 +113,30 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
                     continue;
 
                 fileFullPath = _PathConcat(fullPath, dp->d_name);
-                if (!_GetFileType(fileFullPath, &ft))
+                if (!_GetFileStat(fileFullPath, &ft, &mtime))
                 {
                     switch (ft)
                     {
                     case _FILE_TYPE_REGULAR:
-                        fn = (FileNode_t *)Mmalloc(sizeof(*fn));
-                        memset(fn, 0, sizeof(*fn));
-                        fn->nodeName = SDup(dp->d_name);
-                        TCAdd(FNs, fn);
+                        f = fopen(fileFullPath, "rb");
+                        if (f)
+                        {
+                            if (Crc32_ComputeFile(f, &crc32) == 0)
+                            {
+                                fn = (FileNode_t *)Mmalloc(sizeof(*fn));
+                                memset(fn, 0, sizeof(*fn));
+                                fn->nodeName = SDup(dp->d_name);
+                                fn->file.crc32 = crc32;
+                                fn->file.timeLastModification = mtime;
+                                TCAdd(FNs, fn);
+                            }
+                            else
+                                r = errno;
+                            fclose(f);
+                        }
+                        else
+                            r = errno;
+
                         break;
                     case _FILE_TYPE_FOLDER:
                         fn = (FileNode_t *)Mmalloc(sizeof(*fn));
@@ -210,7 +229,7 @@ static int _IsPathSeparator(const char *c)
         return 0;
 }
 
-static int _GetFileType(const char *fullPath, int *result)
+static int _GetFileStat(const char *fullPath, int *result, time_t *timeLastModification)
 {
     struct stat s;
     int r;
@@ -225,6 +244,8 @@ static int _GetFileType(const char *fullPath, int *result)
         *result = _FILE_TYPE_FOLDER;
     else
         *result = _FILE_TYPE_UNKNOWN;
+
+    *timeLastModification = s.st_mtime;
 
     return 0;
 }
@@ -250,18 +271,22 @@ static void _DestoryFileNode(FileNode_t *fn)
 
 static void _PrintFileNode(FileNode_t *fn, size_t depth)
 {
+    char buf[64];
+    struct tm t;
     size_t i;
-    char *t;
 
-    t = (char *)Mmalloc(depth + 1);
-    memset(t, '-', depth);
-    t[depth] = '\0';
-
-    printf("%s%s\n", t, fn->nodeName);
+    printf("Node: \"%s\"\nType: 0x%02x\nParent: \"%s\"\n", fn->nodeName, (unsigned int)fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
     if (fn->flags & _FILENODE_FLAG_IS_DIR)
+    {
+        printf("Children count: %u\n\n", (unsigned int)fn->folder.childrenLen);
         if (fn->folder.children)
             for (i = 0; i < fn->folder.childrenLen; i += 1)
                 _PrintFileNode((fn->folder.children)[i], depth + 1);
-
-    Mfree(t);
+    }
+    else
+    {
+        t = *localtime(&(fn->file.timeLastModification));
+        strftime(buf, sizeof(buf), "%Y/%m/%d %H:%M:%S", &t);
+        printf("CRC32: 0x%08x\nMTime: %s\n\n", fn->file.crc32, buf);
+    }
 }
