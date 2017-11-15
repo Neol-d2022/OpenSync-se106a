@@ -25,6 +25,7 @@ typedef struct FileNode_struct_t
         FileNodeTypeFolder_t folder;
     };
     char *nodeName;
+    struct FileNode_struct_t *parent;
     unsigned char flags;
 } FileNode_t;
 

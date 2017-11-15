@@ -92,7 +92,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
     DIR *dirp;
     struct dirent *dp;
     char *fileFullPath;
-    size_t i, n;
+    size_t i, j, n;
     int r = 0, s, ft;
 
     TCInit(&DIRs);
@@ -154,6 +154,8 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
         fn->folder.childrenLen = TCCount(&SubDIR);
         fn->folder.children = (FileNode_t **)Mmalloc(sizeof(*(fn->folder.children)) * (fn->folder.childrenLen));
         memcpy(fn->folder.children, SubDIR.fixedStorage.storage, sizeof(*(fn->folder.children)) * (fn->folder.childrenLen));
+        for (j = 0; j < fn->folder.childrenLen; j += 1)
+            (fn->folder.children)[j]->parent = fn;
         TCDeInit(&SubDIR);
         Mfree(fileFullPath);
     }
