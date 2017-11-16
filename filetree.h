@@ -12,6 +12,7 @@
 
 typedef struct
 {
+    size_t size;
     time_t timeLastModification;
     uint32_t crc32;
 } FileNodeTypeFile_t;
@@ -29,6 +30,7 @@ typedef struct FileNode_struct_t
         FileNodeTypeFolder_t folder;
     };
     char *nodeName;
+    char *fullName;
     struct FileNode_struct_t *parent;
     unsigned char flags;
 } FileNode_t;
@@ -37,7 +39,11 @@ typedef struct
 {
     char *basePath;
     FileNode_t **baseChildren;
+    FileNode_t **totalFiles;
+    FileNode_t **totalFolders;
     size_t baseChildrenLen;
+    size_t totalFilesLen;
+    size_t totalFoldersLen;
 } FileTree_t;
 
 /* Initialize a file tree */

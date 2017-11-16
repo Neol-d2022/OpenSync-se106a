@@ -14,7 +14,7 @@ int filetree_test(void)
     printf("Testing FileTreeInit()...No results returned\n");
     FileTreeInit(&t);
     printf("Testing FileTreeSetBasePath()...No results returned\n");
-    FileTreeSetBasePath(&t, "./");
+    FileTreeSetBasePath(&t, ".");
     printf("Testing FileTreeScan()\n");
     r = FileTreeScan(&t);
     printf("T1:\t%d returned, with base pointer %p...", r, t.baseChildren);

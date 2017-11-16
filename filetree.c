@@ -23,10 +23,10 @@
 #define _FILE_TYPE_REGULAR 1
 #define _FILE_TYPE_FOLDER 2
 
-static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs);
+static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles, TC_t *FNFolders);
 static char *_PathConcat(const char *parent, const char *filename);
 static int _IsPathSeparator(const char *c);
-static int _GetFileStat(const char *fullPath, int *result, time_t *timeLastModification);
+static int _GetFileStat(const char *fullPath, int *result, FileNodeTypeFile_t *fnfile);
 static void _DestoryFileNode(FileNode_t *fn);
 static void _PrintFileNode(FileNode_t *fn, size_t depth);
 
@@ -50,6 +50,10 @@ void FileTreeDeInit(FileTree_t *t)
         }
         Mfree(t->baseChildren);
     }
+    if (t->totalFiles)
+        Mfree(t->totalFiles);
+    if (t->totalFolders)
+        Mfree(t->totalFolders);
 }
 
 void FileTreeSetBasePath(FileTree_t *t, const char *basePath)
@@ -60,18 +64,33 @@ void FileTreeSetBasePath(FileTree_t *t, const char *basePath)
 
 int FileTreeScan(FileTree_t *t)
 {
-    TC_t FNs;
+    TC_t FNs, Files, Folders;
     int r;
 
     TCInit(&FNs);
-    r = _FileTreeScanRecursive(t->basePath, &FNs);
+    TCInit(&Files);
+    TCInit(&Folders);
+    r = _FileTreeScanRecursive(t->basePath, &FNs, &Files, &Folders);
 
     TCTransform(&FNs);
+    TCTransform(&Files);
+    TCTransform(&Folders);
+
     t->baseChildrenLen = TCCount(&FNs);
     t->baseChildren = (FileNode_t **)Mmalloc(sizeof(*(t->baseChildren)) * t->baseChildrenLen);
     memcpy(t->baseChildren, FNs.fixedStorage.storage, sizeof(*(t->baseChildren)) * t->baseChildrenLen);
 
+    t->totalFilesLen = TCCount(&Files);
+    t->totalFiles = (FileNode_t **)Mmalloc(sizeof(*(t->totalFiles)) * t->totalFilesLen);
+    memcpy(t->totalFiles, Files.fixedStorage.storage, sizeof(*(t->totalFiles)) * t->totalFilesLen);
+
+    t->totalFoldersLen = TCCount(&Folders);
+    t->totalFolders = (FileNode_t **)Mmalloc(sizeof(*(t->totalFolders)) * t->totalFoldersLen);
+    memcpy(t->totalFolders, Folders.fixedStorage.storage, sizeof(*(t->totalFolders)) * t->totalFoldersLen);
+
     TCDeInit(&FNs);
+    TCDeInit(&Files);
+    TCDeInit(&Folders);
     return r;
 }
 
@@ -79,28 +98,38 @@ void FileTreeDebugPrint(FileTree_t *t)
 {
     size_t i;
 
-    printf("Path = \"%s\"\n", t->basePath);
+    printf("Path = \"%s\"\nTotal Files = %u\nTotal Folders = %u\n\n", t->basePath, (unsigned int)t->totalFilesLen, (unsigned int)t->totalFoldersLen);
     if (t->baseChildren)
         for (i = 0; i < t->baseChildrenLen; i += 1)
             _PrintFileNode(t->baseChildren[i], 0);
 }
 
 // Private functions definition
-static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
+static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles, TC_t *FNFolders)
 {
     TC_t DIRs, SubDIR;
-    time_t mtime;
+    FileNodeTypeFile_t fnfile;
     FileNode_t *fn;
     DIR *dirp;
     struct dirent *dp;
     char *fileFullPath;
-    size_t i, j, n;
+    size_t i, j, n, l;
     FILE *f;
     int r = 0, s, ft;
     uint32_t crc32;
 
     TCInit(&DIRs);
-    dirp = opendir(fullPath);
+    if (fullPath)
+    {
+        l = strlen(fullPath);
+        if (!l)
+            dirp = opendir(".");
+        else
+            dirp = opendir(fullPath);
+    }
+    else
+        dirp = opendir(".");
+
     if (dirp)
         do
         {
@@ -113,7 +142,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
                     continue;
 
                 fileFullPath = _PathConcat(fullPath, dp->d_name);
-                if (!_GetFileStat(fileFullPath, &ft, &mtime))
+                if (!_GetFileStat(fileFullPath, &ft, &fnfile))
                 {
                     switch (ft)
                     {
@@ -126,9 +155,11 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
                                 fn = (FileNode_t *)Mmalloc(sizeof(*fn));
                                 memset(fn, 0, sizeof(*fn));
                                 fn->nodeName = SDup(dp->d_name);
-                                fn->file.crc32 = crc32;
-                                fn->file.timeLastModification = mtime;
+                                fn->fullName = SDup(fileFullPath);
+                                fnfile.crc32 = crc32;
+                                memcpy(&(fn->file), &fnfile, sizeof(fn->file));
                                 TCAdd(FNs, fn);
+                                TCAdd(FNFiles, fn);
                             }
                             else
                                 r = errno;
@@ -142,9 +173,11 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
                         fn = (FileNode_t *)Mmalloc(sizeof(*fn));
                         memset(fn, 0, sizeof(*fn));
                         fn->nodeName = SDup(dp->d_name);
+                        fn->fullName = SDup(fileFullPath);
                         fn->flags |= _FILENODE_FLAG_IS_DIR;
                         TCAdd(FNs, fn);
                         TCAdd(&DIRs, fn);
+                        TCAdd(FNFolders, fn);
                         break;
                     case _FILE_TYPE_UNKNOWN:
                         break;
@@ -166,7 +199,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
         fn = (FileNode_t *)TCI(&DIRs, i);
         fileFullPath = _PathConcat(fullPath, fn->nodeName);
         TCInit(&SubDIR);
-        s = _FileTreeScanRecursive(fileFullPath, &SubDIR);
+        s = _FileTreeScanRecursive(fileFullPath, &SubDIR, FNFiles, FNFolders);
         if (s)
             r = s;
         TCTransform(&SubDIR);
@@ -186,17 +219,14 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs)
 static char *_PathConcat(const char *parent, const char *filename)
 {
     static const char kPathSeparatorString[] = {kPathSeparator, '\0'};
-    size_t a, b;
+    size_t a;
     unsigned int nSeparators = 0;
 
     a = strlen(parent);
-    b = strlen(filename);
 
-    if (!a || !b)
-        abort();
-
-    if (_IsPathSeparator(parent + a - 1))
-        nSeparators += 1;
+    if (a > 0)
+        if (_IsPathSeparator(parent + a - 1))
+            nSeparators += 1;
 
     if (_IsPathSeparator(filename))
         nSeparators += 1;
@@ -229,7 +259,7 @@ static int _IsPathSeparator(const char *c)
         return 0;
 }
 
-static int _GetFileStat(const char *fullPath, int *result, time_t *timeLastModification)
+static int _GetFileStat(const char *fullPath, int *result, FileNodeTypeFile_t *fnfile)
 {
     struct stat s;
     int r;
@@ -245,7 +275,8 @@ static int _GetFileStat(const char *fullPath, int *result, time_t *timeLastModif
     else
         *result = _FILE_TYPE_UNKNOWN;
 
-    *timeLastModification = s.st_mtime;
+    fnfile->size = (size_t)s.st_size;
+    fnfile->timeLastModification = s.st_mtime;
 
     return 0;
 }
@@ -255,6 +286,7 @@ static void _DestoryFileNode(FileNode_t *fn)
     size_t i;
 
     Mfree(fn->nodeName);
+    Mfree(fn->fullName);
     if (fn->flags & _FILENODE_FLAG_IS_DIR)
     {
         if (fn->folder.children)
@@ -275,7 +307,7 @@ static void _PrintFileNode(FileNode_t *fn, size_t depth)
     struct tm t;
     size_t i;
 
-    printf("Node: \"%s\"\nType: 0x%02x\nParent: \"%s\"\n", fn->nodeName, (unsigned int)fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
+    printf("Node: \"%s\"\nFull: \"%s\"\nType: 0x%02x\nParent: \"%s\"\n", fn->nodeName, fn->fullName, (unsigned int)fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
     if (fn->flags & _FILENODE_FLAG_IS_DIR)
     {
         printf("Children count: %u\n\n", (unsigned int)fn->folder.childrenLen);
@@ -287,6 +319,6 @@ static void _PrintFileNode(FileNode_t *fn, size_t depth)
     {
         t = *localtime(&(fn->file.timeLastModification));
         strftime(buf, sizeof(buf), "%Y/%m/%d %H:%M:%S", &t);
-        printf("CRC32: 0x%08x\nMTime: %s\n\n", fn->file.crc32, buf);
+        printf("CRC32: 0x%08x\nMTime: %s\nSize: %u\n\n", fn->file.crc32, buf, (unsigned int)fn->file.size);
     }
 }
