@@ -37,7 +37,7 @@ uint32_t MReadU32(void **ptr);
 /* Write a 64-bit unsigned integer */
 void MWriteU64(void *ptr, uint64_t v);
 
-/* Read a 32-bit unsigned integer */
+/* Read a 64-bit unsigned integer */
 uint64_t MReadU64(void **ptr);
 
 /* Write a string to memory block. Must be released by call to MBfree().*/
