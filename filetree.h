@@ -70,4 +70,7 @@ void FileTreeToMemoryblock(FileTree_t *t, MemoryBlock_t *mb);
 /* Memory Block to File Tree, Return NULL if invalid */
 FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath);
 
+/* Compute CRC32 of every files under the tree */
+int FileTreeComputeCRC32(FileTree_t *t);
+
 #endif

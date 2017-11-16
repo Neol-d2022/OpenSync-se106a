@@ -29,11 +29,22 @@ int filetree_test(void)
         return 1;
     }
 
+    printf("Testing FileTreeComputeCRC32()\n");
+    r = FileTreeComputeCRC32(&t);
+    printf("T2:\t%d returned...", r);
+    if (r == 0)
+        printf("PASSED\n");
+    else
+    {
+        printf("TEST FAILED\n");
+        FileTreeDeInit(&t);
+        return 1;
+    }
     FileTreeDebugPrint(&t);
 
     printf("Testing FileTreeToMemoryblock()\n");
     FileTreeToMemoryblock(&t, &mb);
-    printf("T2:\t%p returned, with size %u...", mb.ptr, (unsigned int)mb.size);
+    printf("T3:\t%p returned, with size %u...", mb.ptr, (unsigned int)mb.size);
     if (mb.ptr && mb.size)
         printf("PASSED\n");
     else
@@ -52,7 +63,7 @@ int filetree_test(void)
 
     printf("Testing FileTreeFromMemoryBlock()\n");
     t2 = FileTreeFromMemoryBlock(&mb, t.basePath);
-    printf("T3:\t%p returned", t2);
+    printf("T4:\t%p returned", t2);
     if (t2)
     {
         printf(", with total files count %u and total folders cout %u...", (unsigned int)t2->totalFilesLen, (unsigned int)t2->totalFoldersLen);
@@ -84,7 +95,7 @@ int filetree_test(void)
     mb.size -= 1;
     printf("Testing FileTreeFromMemoryBlock() invalid memory block.\n");
     t2 = FileTreeFromMemoryBlock(&mb, t.basePath);
-    printf("T4:\t%p returned", t2);
+    printf("T5:\t%p returned", t2);
     if (t2)
     {
         printf(", with total files count %u and total folders cout %u...", (unsigned int)t2->totalFilesLen, (unsigned int)t2->totalFoldersLen);
@@ -102,7 +113,7 @@ int filetree_test(void)
 
     j = MDebug();
     printf("Testing Memory Leaks.\n");
-    printf("T5:\tExpected = %u, Actual = %u...", (unsigned int)i, (unsigned int)j);
+    printf("T6:\tExpected = %u, Actual = %u...", (unsigned int)i, (unsigned int)j);
     if (i == j)
         printf("PASSED\n");
     else

@@ -18,6 +18,7 @@
 #endif
 
 #define _FILENODE_FLAG_IS_DIR 0x00000001
+#define _FILENODE_FLAG_CRC_VALID 0x00000002
 
 #define _FILE_TYPE_UNKNOWN 0
 #define _FILE_TYPE_REGULAR 1
@@ -152,12 +153,12 @@ FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath)
     (*maxLength) -= sizeof(baseCountU64);
 
     t = (FileTree_t *)Mmalloc(sizeof(*t));
-    t->basePath = SDup(".");
+    t->basePath = SDup(parentPath);
     t->baseChildrenLen = (size_t)baseCountU64;
     t->baseChildren = (FileNode_t **)Mmalloc(sizeof(*(t->baseChildren)) * t->baseChildrenLen);
     for (i = 0; i < t->baseChildrenLen; i += 1)
     {
-        child = _FileNodeFromMemoryBlock(NULL, parentPath, ptr, maxLength);
+        child = _FileNodeFromMemoryBlock(NULL, t->basePath, ptr, maxLength);
         if (child == NULL)
         {
             size_t j;
@@ -178,6 +179,35 @@ FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath)
     return t;
 }
 
+int FileTreeComputeCRC32(FileTree_t *t)
+{
+    FILE *f;
+    size_t i;
+    uint32_t crc32;
+    int r = 0, s;
+
+    for (i = 0; i < t->totalFilesLen; i += 1)
+    {
+        f = fopen((t->totalFiles)[i]->fullName, "rb");
+        if (f)
+        {
+            s = Crc32_ComputeFile(f, &crc32);
+            if (s)
+                r = s;
+            else
+            {
+                (t->totalFiles)[i]->file.crc32 = crc32;
+                (t->totalFiles)[i]->flags |= _FILENODE_FLAG_CRC_VALID;
+            }
+            fclose(f);
+        }
+        else
+            r = errno;
+    }
+
+    return r;
+}
+
 // ============================
 // Private functions definition
 // ============================
@@ -193,7 +223,6 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
     size_t i, j, n, l;
     FILE *f;
     int r = 0, s, ft;
-    uint32_t crc32;
 
     TCInit(&DIRs);
     if (fullPath)
@@ -227,19 +256,14 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
                         f = fopen(fileFullPath, "rb");
                         if (f)
                         {
-                            if (Crc32_ComputeFile(f, &crc32) == 0)
-                            {
-                                fn = (FileNode_t *)Mmalloc(sizeof(*fn));
-                                memset(fn, 0, sizeof(*fn));
-                                fn->nodeName = SDup(dp->d_name);
-                                fn->fullName = SDup(fileFullPath);
-                                fnfile.crc32 = crc32;
-                                memcpy(&(fn->file), &fnfile, sizeof(fn->file));
-                                TCAdd(FNs, fn);
-                                TCAdd(FNFiles, fn);
-                            }
-                            else
-                                r = errno;
+                            fn = (FileNode_t *)Mmalloc(sizeof(*fn));
+                            memset(fn, 0, sizeof(*fn));
+                            fn->nodeName = SDup(dp->d_name);
+                            fn->fullName = SDup(fileFullPath);
+                            fn->flags &= (~_FILENODE_FLAG_CRC_VALID);
+                            memcpy(&(fn->file), &fnfile, sizeof(fn->file));
+                            TCAdd(FNs, fn);
+                            TCAdd(FNFiles, fn);
                             fclose(f);
                         }
                         else
@@ -384,7 +408,7 @@ static void _PrintFileNode(FileNode_t *fn, size_t depth)
     struct tm t;
     size_t i;
 
-    printf("Node: \"%s\"\nFull: \"%s\"\nType: 0x%02x\nParent: \"%s\"\n", fn->nodeName, fn->fullName, fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
+    printf("Node: \"%s\"\nFull: \"%s\"\nType: 0x%08x\nParent: \"%s\"\n", fn->nodeName, fn->fullName, fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
     if (fn->flags & _FILENODE_FLAG_IS_DIR)
     {
         printf("Children count: %u\n\n", (unsigned int)fn->folder.childrenLen);
