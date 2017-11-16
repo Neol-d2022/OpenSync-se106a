@@ -163,8 +163,8 @@ FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath)
             size_t j;
             for (j = 0; j < i; j += 1)
             {
-                _DestoryFileNode((t->baseChildren)[i]);
-                Mfree((t->baseChildren)[i]);
+                _DestoryFileNode((t->baseChildren)[j]);
+                Mfree((t->baseChildren)[j]);
             }
             Mfree(t->baseChildren);
             Mfree(t->basePath);
