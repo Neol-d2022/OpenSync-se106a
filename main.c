@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include "config.h"
 #include "mm_test.h"
 #include "strings_test.h"
 #include "filetree_test.h"
@@ -17,7 +18,7 @@ int selfTest(void)
 
 int main(void)
 {
-    printf("Hello, I am OpenSync-se106a. I am currently under construction.\n");
+    printf("Hello, I am %s. I am currently under construction.\n", PACKAGE_STRING);
     if (selfTest())
     {
         printf("Self test failed. Exiting now.\n");
