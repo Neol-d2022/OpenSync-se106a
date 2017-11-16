@@ -6,8 +6,10 @@
 
 int filetree_test(void)
 {
+    MemoryBlock_t mb;
     size_t i, j;
-    FileTree_t t;
+    FileTree_t t, *t2;
+    FILE *f;
     int r;
 
     i = MDebug();
@@ -28,11 +30,60 @@ int filetree_test(void)
     }
 
     FileTreeDebugPrint(&t);
+
+    printf("Testing FileTreeToMemoryblock()\n");
+    FileTreeToMemoryblock(&t, &mb);
+    printf("T2:\t%p returned, with size %u...", mb.ptr, (unsigned int)mb.size);
+    if (mb.ptr && mb.size)
+        printf("PASSED\n");
+    else
+    {
+        printf("TEST FAILED\n");
+        FileTreeDeInit(&t);
+        return 1;
+    }
+    printf("Writing results to filetree.bin for debugging purposes.\n");
+    f = fopen("filetree.bin", "wb");
+    if (f)
+    {
+        fwrite(mb.ptr, mb.size, 1, f);
+        fclose(f);
+    }
+
+    printf("Testing FileTreeFromMemoryBlock()\n");
+    t2 = FileTreeFromMemoryBlock(&mb, t.basePath);
+    printf("T3:\t%p returned", t2);
+    if (t2)
+    {
+        printf(", with total files count %u and total folders cout %u...", (unsigned int)t2->totalFilesLen, (unsigned int)t2->totalFoldersLen);
+        if (t.totalFilesLen == t2->totalFilesLen && t.totalFoldersLen == t2->totalFoldersLen)
+            printf("PASSED\n");
+        else
+        {
+            printf("TEST FAILED\n");
+            FileTreeDeInit(&t);
+            FileTreeDeInit(t2);
+            Mfree(t2);
+            MBfree(&mb);
+            return 1;
+        }
+    }
+    else
+    {
+        printf("...TEST FAILED\n");
+        FileTreeDeInit(&t);
+        MBfree(&mb);
+        return 1;
+    }
+    MBfree(&mb);
     FileTreeDeInit(&t);
+    FileTreeDebugPrint(t2);
+    FileTreeDeInit(t2);
+    Mfree(t2);
 
     j = MDebug();
     printf("Testing Memory Leaks.\n");
-    printf("T2:\tExpected = %u, Actual = %u...", (unsigned int)i, (unsigned int)j);
+    printf("T4:\tExpected = %u, Actual = %u...", (unsigned int)i, (unsigned int)j);
     if (i == j)
         printf("PASSED\n");
     else

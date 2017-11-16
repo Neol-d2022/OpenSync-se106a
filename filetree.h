@@ -10,6 +10,9 @@
 /* time_t */
 #include <time.h>
 
+/* MemoryBlock_t */
+#include "mb.h"
+
 typedef struct
 {
     size_t size;
@@ -32,7 +35,7 @@ typedef struct FileNode_struct_t
     char *nodeName;
     char *fullName;
     struct FileNode_struct_t *parent;
-    unsigned char flags;
+    unsigned int flags;
 } FileNode_t;
 
 typedef struct
@@ -60,5 +63,11 @@ int FileTreeScan(FileTree_t *t);
 
 /* DEBUG. Print file tree */
 void FileTreeDebugPrint(FileTree_t *t);
+
+/* File Tree to Memory Block */
+void FileTreeToMemoryblock(FileTree_t *t, MemoryBlock_t *mb);
+
+/* Memory Block to File Tree, Return NULL if invalid */
+FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath);
 
 #endif
