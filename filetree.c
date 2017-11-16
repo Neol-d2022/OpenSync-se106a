@@ -530,8 +530,8 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
                 size_t j;
                 for (j = 0; j < i; j += 1)
                 {
-                    _DestoryFileNode((fn->folder.children)[i]);
-                    Mfree((fn->folder.children)[i]);
+                    _DestoryFileNode((fn->folder.children)[j]);
+                    Mfree((fn->folder.children)[j]);
                 }
                 Mfree(fn->folder.children);
                 Mfree(node);
