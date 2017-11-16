@@ -17,3 +17,6 @@ $(BIN): $(OBJS)
 
 clean:
 	rm -f $(OBJS) $(BIN)
+
+test:
+	./OpenSync
