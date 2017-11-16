@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 
-static const char *_NO_MEM_MSG = "Program out of memory.\n";
+#define _NO_MEM_MSG "Program out of memory.\n"
 static size_t _gAllocationCount = 0;
 
 void *Mmalloc(size_t s)

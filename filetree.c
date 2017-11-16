@@ -369,9 +369,9 @@ static int _GetFileStat(const char *fullPath, int *result, FileNodeTypeFile_t *f
     if (r)
         return r;
 
-    if (_S_ISREG(s.st_mode))
+    if (S_ISREG(s.st_mode))
         *result = _FILE_TYPE_REGULAR;
-    else if (_S_ISDIR(s.st_mode))
+    else if (S_ISDIR(s.st_mode))
         *result = _FILE_TYPE_FOLDER;
     else
         *result = _FILE_TYPE_UNKNOWN;
