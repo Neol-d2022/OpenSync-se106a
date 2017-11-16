@@ -579,6 +579,9 @@ static void _FileTreeConstructAfterLoadingFromMemoryBlock(FileTree_t *t)
         for (i = 0; i < t->baseChildrenLen; i += 1)
             _FileTreeConstructAfterLoadingFromMemoryBlock_Node(t->baseChildren[i], &Files, &Folders);
 
+    TCTransform(&Files);
+    TCTransform(&Folders);
+
     t->totalFilesLen = TCCount(&Files);
     t->totalFiles = (FileNode_t **)Mmalloc(sizeof(*(t->totalFiles)) * t->totalFilesLen);
     memcpy(t->totalFiles, Files.fixedStorage.storage, sizeof(*(t->totalFiles)) * t->totalFilesLen);
