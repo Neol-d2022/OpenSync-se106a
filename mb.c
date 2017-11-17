@@ -4,6 +4,8 @@
 #include "mb.h"
 #include "mm.h"
 
+static void _MMConcatA(MemoryBlock_t *dst, size_t n, MemoryBlock_t *array, size_t totalLength);
+
 void MDup(MemoryBlock_t *dst, const MemoryBlock_t *m)
 {
     void *r;
@@ -23,54 +25,33 @@ void MConcat(MemoryBlock_t *dst, const MemoryBlock_t *m1, const MemoryBlock_t *m
 
 void MMConcat(MemoryBlock_t *dst, size_t n, ...)
 {
-    void *r;
-    const MemoryBlock_t **mbs;
-    size_t i, c, d;
+    MemoryBlock_t *mbs;
+    size_t i, c;
     va_list list;
 
     c = 0;
     va_start(list, n);
-    mbs = (const MemoryBlock_t **)Mmalloc(sizeof(*mbs) * n);
+    mbs = (MemoryBlock_t *)Mmalloc(sizeof(*mbs) * n);
     for (i = 0; i < n; i += 1)
     {
-        mbs[i] = va_arg(list, const MemoryBlock_t *);
-        c += mbs[i]->size;
+        mbs[i] = *va_arg(list, const MemoryBlock_t *);
+        c += mbs[i].size;
     }
     va_end(list);
 
-    r = Mmalloc(c);
-    d = 0;
-    for (i = 0; i < n; i += 1)
-    {
-        memcpy(r + d, mbs[i]->ptr, mbs[i]->size);
-        d += mbs[i]->size;
-    }
-
+    _MMConcatA(dst, n, mbs, c);
     Mfree(mbs);
-
-    dst->ptr = r;
-    dst->size = d;
 }
 
 void MMConcatA(MemoryBlock_t *dst, size_t n, MemoryBlock_t *array)
 {
-    void *r;
-    size_t i, c, d;
+    size_t i, c;
 
     c = 0;
     for (i = 0; i < n; i += 1)
         c += array[i].size;
 
-    r = Mmalloc(c);
-    d = 0;
-    for (i = 0; i < n; i += 1)
-    {
-        memcpy(r + d, array[i].ptr, array[i].size);
-        d += array[i].size;
-    }
-
-    dst->ptr = r;
-    dst->size = d;
+    _MMConcatA(dst, n, array, c);
 }
 
 void MBfree(MemoryBlock_t *m)
@@ -178,4 +159,25 @@ char *MReadString(void **ptr, size_t *maxLength)
     (*maxLength) -= len;
 
     return s;
+}
+
+// ==========================
+// Local function definitions
+// ==========================
+
+static void _MMConcatA(MemoryBlock_t *dst, size_t n, MemoryBlock_t *array, size_t totalLength)
+{
+    void *r;
+    size_t i, d;
+
+    r = Mmalloc(totalLength);
+    d = 0;
+    for (i = 0; i < n; i += 1)
+    {
+        memcpy(r + d, array[i].ptr, array[i].size);
+        d += array[i].size;
+    }
+
+    dst->ptr = r;
+    dst->size = d;
 }

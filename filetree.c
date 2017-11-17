@@ -34,6 +34,8 @@ static void _FileNodeToMemoryBlock(FileNode_t *fn, MemoryBlock_t *mb);
 static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *parentPath, void **ptr, size_t *maxLength);
 static void _FileTreeConstructAfterLoadingFromMemoryBlock(FileTree_t *t);
 static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, TC_t *files, TC_t *folders);
+static size_t _DuplicateStorageFromTCTransformed(FileNode_t ***base, TC_t *tc);
+static void _AutoVariableToMemoryBlock(MemoryBlock_t *mb, void *ptr, size_t size);
 
 void FileTreeInit(FileTree_t *t)
 {
@@ -81,17 +83,9 @@ int FileTreeScan(FileTree_t *t)
     TCTransform(&Files);
     TCTransform(&Folders);
 
-    t->baseChildrenLen = TCCount(&FNs);
-    t->baseChildren = (FileNode_t **)Mmalloc(sizeof(*(t->baseChildren)) * t->baseChildrenLen);
-    memcpy(t->baseChildren, FNs.fixedStorage.storage, sizeof(*(t->baseChildren)) * t->baseChildrenLen);
-
-    t->totalFilesLen = TCCount(&Files);
-    t->totalFiles = (FileNode_t **)Mmalloc(sizeof(*(t->totalFiles)) * t->totalFilesLen);
-    memcpy(t->totalFiles, Files.fixedStorage.storage, sizeof(*(t->totalFiles)) * t->totalFilesLen);
-
-    t->totalFoldersLen = TCCount(&Folders);
-    t->totalFolders = (FileNode_t **)Mmalloc(sizeof(*(t->totalFolders)) * t->totalFoldersLen);
-    memcpy(t->totalFolders, Folders.fixedStorage.storage, sizeof(*(t->totalFolders)) * t->totalFoldersLen);
+    t->baseChildrenLen = _DuplicateStorageFromTCTransformed(&(t->baseChildren), &FNs);
+    t->totalFilesLen = _DuplicateStorageFromTCTransformed(&(t->totalFiles), &Files);
+    t->totalFoldersLen = _DuplicateStorageFromTCTransformed(&(t->totalFolders), &Folders);
 
     TCDeInit(&FNs);
     TCDeInit(&Files);
@@ -116,9 +110,8 @@ void FileTreeToMemoryblock(FileTree_t *t, MemoryBlock_t *mb)
     MemoryBlock_t *results;
     size_t i;
 
-    baseCountM.ptr = baseCountUC;
-    baseCountM.size = sizeof(baseCountUC);
     MWriteU64(baseCountUC, t->baseChildrenLen);
+    _AutoVariableToMemoryBlock(&baseCountM, baseCountUC, sizeof(baseCountUC));
 
     results = Mmalloc(sizeof(*results) * (t->baseChildrenLen + 1));
     memcpy(results + 0, &baseCountM, sizeof(*results));
@@ -202,7 +195,10 @@ int FileTreeComputeCRC32(FileTree_t *t)
             fclose(f);
         }
         else
+        {
+            (t->totalFiles)[i]->flags &= (~_FILENODE_FLAG_CRC_VALID);
             r = errno;
+        }
     }
 
     return r;
@@ -304,9 +300,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
         if (s)
             r = s;
         TCTransform(&SubDIR);
-        fn->folder.childrenLen = TCCount(&SubDIR);
-        fn->folder.children = (FileNode_t **)Mmalloc(sizeof(*(fn->folder.children)) * (fn->folder.childrenLen));
-        memcpy(fn->folder.children, SubDIR.fixedStorage.storage, sizeof(*(fn->folder.children)) * (fn->folder.childrenLen));
+        fn->folder.childrenLen = _DuplicateStorageFromTCTransformed(&(fn->folder.children), &SubDIR);
         for (j = 0; j < fn->folder.childrenLen; j += 1)
             (fn->folder.children)[j]->parent = fn;
         TCDeInit(&SubDIR);
@@ -582,13 +576,8 @@ static void _FileTreeConstructAfterLoadingFromMemoryBlock(FileTree_t *t)
     TCTransform(&Files);
     TCTransform(&Folders);
 
-    t->totalFilesLen = TCCount(&Files);
-    t->totalFiles = (FileNode_t **)Mmalloc(sizeof(*(t->totalFiles)) * t->totalFilesLen);
-    memcpy(t->totalFiles, Files.fixedStorage.storage, sizeof(*(t->totalFiles)) * t->totalFilesLen);
-
-    t->totalFoldersLen = TCCount(&Folders);
-    t->totalFolders = (FileNode_t **)Mmalloc(sizeof(*(t->totalFolders)) * t->totalFoldersLen);
-    memcpy(t->totalFolders, Folders.fixedStorage.storage, sizeof(*(t->totalFolders)) * t->totalFoldersLen);
+    t->totalFilesLen = _DuplicateStorageFromTCTransformed(&(t->totalFiles), &Files);
+    t->totalFoldersLen = _DuplicateStorageFromTCTransformed(&(t->totalFolders), &Folders);
 
     TCDeInit(&Files);
     TCDeInit(&Folders);
@@ -606,4 +595,21 @@ static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, T
     }
     else
         TCAdd(files, fn);
+}
+
+static size_t _DuplicateStorageFromTCTransformed(FileNode_t ***base, TC_t *tc)
+{
+    size_t count;
+
+    count = TCCount(tc);
+    *base = (FileNode_t **)Mmalloc(sizeof(**base) * count);
+    memcpy(*base, tc->fixedStorage.storage, sizeof(**base) * count);
+
+    return count;
+}
+
+static void _AutoVariableToMemoryBlock(MemoryBlock_t *mb, void *ptr, size_t size)
+{
+    mb->ptr = ptr;
+    mb->size = size;
 }

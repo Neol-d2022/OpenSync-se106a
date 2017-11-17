@@ -4,6 +4,8 @@
 #include "strings.h"
 #include "mm.h"
 
+static char *_SMConcatA(size_t n, const char **array, size_t *lengths, size_t totalLength);
+
 char *SDup(const char *str)
 {
     char *r;
@@ -42,17 +44,47 @@ char *SMConcat(size_t n, ...)
     }
     va_end(list);
 
-    r = (char *)Mmalloc(c + 1);
-    d = 0;
-    for (i = 0; i < n; i += 1)
-    {
-        memcpy(r + d, s[i], l[i]);
-        d += l[i];
-    }
-    r[c] = '\0';
+    r = _SMConcatA(n, s, l, c);
 
     Mfree(s);
     Mfree(l);
+
+    return r;
+}
+
+char *SMConcatA(size_t n, const char **array)
+{
+    char *r;
+    size_t *l;
+    size_t i, c;
+
+    l = (size_t *)Mmalloc(sizeof(*l) * n);
+    c = 0;
+    for (i = 0; i < n; i += 1)
+        c += (l[i] = strlen(array[i]));
+
+    r = _SMConcatA(n, array, l, c);
+
+    Mfree(l);
+}
+
+// ==========================
+// Local function definitions
+// ==========================
+
+static char *_SMConcatA(size_t n, const char **array, size_t *lengths, size_t totalLength)
+{
+    char *r;
+    size_t i, d;
+
+    r = (char *)Mmalloc(totalLength + 1);
+    d = 0;
+    for (i = 0; i < n; i += 1)
+    {
+        memcpy(r + d, array[i], lengths[i]);
+        d += lengths[i];
+    }
+    r[totalLength] = '\0';
 
     return r;
 }
