@@ -18,6 +18,7 @@ typedef struct
     size_t size;
     time_t timeLastModification;
     uint32_t crc32;
+    uint32_t version;
 } FileNodeTypeFile_t;
 
 typedef struct

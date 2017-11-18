@@ -19,6 +19,15 @@
 
 #define _FILENODE_FLAG_IS_DIR 0x00000001
 #define _FILENODE_FLAG_CRC_VALID 0x00000002
+#define _FILENODE_FLAG_CREATED 0x00000004
+#define _FILENODE_FLAG_DELETED 0x00000008
+#define _FILENODE_FLAG_MODIFIED 0x00000010
+#define _FILENODE_FLAG_MOVED_FROM 0x00000020
+#define _FILENODE_FLAG_VERSION_VALID 0x00000040
+
+#define _FLAG_SET(f, x) ((f) |= (x))
+#define _FLAG_RESET(f, x) ((f) &= (~(x)))
+#define _FLAG_ISSET(f, x) ((f) & (x))
 
 #define _FILE_TYPE_UNKNOWN 0
 #define _FILE_TYPE_REGULAR 1
@@ -28,14 +37,21 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
 static char *_PathConcat(const char *parent, const char *filename);
 static int _IsPathSeparator(const char *c);
 static int _GetFileStat(const char *fullPath, int *result, FileNodeTypeFile_t *fnfile);
-static void _DestoryFileNode(FileNode_t *fn);
-static void _PrintFileNode(FileNode_t *fn, size_t depth);
+static void _DestoryFileNode(FileNode_t *fn, void *param);
+static void _PrintFileNode(FileNode_t *fn, void *param);
 static void _FileNodeToMemoryBlock(FileNode_t *fn, MemoryBlock_t *mb);
 static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *parentPath, void **ptr, size_t *maxLength);
 static void _FileTreeConstructAfterLoadingFromMemoryBlock(FileTree_t *t);
-static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, TC_t *files, TC_t *folders);
+static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, void *param);
 static size_t _DuplicateStorageFromTCTransformed(FileNode_t ***base, TC_t *tc);
 static void _AutoVariableToMemoryBlock(MemoryBlock_t *mb, void *ptr, size_t size);
+static void _FileNodeTraverse(FileNode_t *fn, void *param, void (*traverser)(FileNode_t *fn, void *param));
+
+typedef struct
+{
+    TC_t *files;
+    TC_t *folders;
+} Reconstruct_internal_object_t;
 
 void FileTreeInit(FileTree_t *t)
 {
@@ -52,7 +68,7 @@ void FileTreeDeInit(FileTree_t *t)
     {
         for (i = 0; i < t->baseChildrenLen; i += 1)
         {
-            _DestoryFileNode(t->baseChildren[i]);
+            _FileNodeTraverse(t->baseChildren[i], NULL, _DestoryFileNode);
             Mfree(t->baseChildren[i]);
         }
         Mfree(t->baseChildren);
@@ -95,12 +111,12 @@ int FileTreeScan(FileTree_t *t)
 
 void FileTreeDebugPrint(FileTree_t *t)
 {
-    size_t i;
+    size_t i, depth = 0;
 
     printf("Path = \"%s\"\nTotal Files = %u\nTotal Folders = %u\n\n", t->basePath, (unsigned int)t->totalFilesLen, (unsigned int)t->totalFoldersLen);
     if (t->baseChildren)
         for (i = 0; i < t->baseChildrenLen; i += 1)
-            _PrintFileNode(t->baseChildren[i], 0);
+            _FileNodeTraverse(t->baseChildren[i], &depth, _PrintFileNode);
 }
 
 void FileTreeToMemoryblock(FileTree_t *t, MemoryBlock_t *mb)
@@ -157,7 +173,7 @@ FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath)
             size_t j;
             for (j = 0; j < i; j += 1)
             {
-                _DestoryFileNode((t->baseChildren)[j]);
+                _FileNodeTraverse((t->baseChildren)[j], NULL, _DestoryFileNode);
                 Mfree((t->baseChildren)[j]);
             }
             Mfree(t->baseChildren);
@@ -190,13 +206,13 @@ int FileTreeComputeCRC32(FileTree_t *t)
             else
             {
                 (t->totalFiles)[i]->file.crc32 = crc32;
-                (t->totalFiles)[i]->flags |= _FILENODE_FLAG_CRC_VALID;
+                _FLAG_SET((t->totalFiles)[i]->flags, _FILENODE_FLAG_CRC_VALID);
             }
             fclose(f);
         }
         else
         {
-            (t->totalFiles)[i]->flags &= (~_FILENODE_FLAG_CRC_VALID);
+            _FLAG_RESET((t->totalFiles)[i]->flags, _FILENODE_FLAG_CRC_VALID);
             r = errno;
         }
     }
@@ -256,7 +272,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
                             memset(fn, 0, sizeof(*fn));
                             fn->nodeName = SDup(dp->d_name);
                             fn->fullName = SDup(fileFullPath);
-                            fn->flags &= (~_FILENODE_FLAG_CRC_VALID);
+                            _FLAG_RESET(fn->flags, _FILENODE_FLAG_CRC_VALID);
                             memcpy(&(fn->file), &fnfile, sizeof(fn->file));
                             TCAdd(FNs, fn);
                             TCAdd(FNFiles, fn);
@@ -271,7 +287,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
                         memset(fn, 0, sizeof(*fn));
                         fn->nodeName = SDup(dp->d_name);
                         fn->fullName = SDup(fileFullPath);
-                        fn->flags |= _FILENODE_FLAG_IS_DIR;
+                        _FLAG_SET(fn->flags, _FILENODE_FLAG_IS_DIR);
                         TCAdd(FNs, fn);
                         TCAdd(&DIRs, fn);
                         TCAdd(FNFolders, fn);
@@ -376,45 +392,38 @@ static int _GetFileStat(const char *fullPath, int *result, FileNodeTypeFile_t *f
     return 0;
 }
 
-static void _DestoryFileNode(FileNode_t *fn)
+static void _DestoryFileNode(FileNode_t *fn, void *param)
 {
     size_t i;
 
+    param = param;
     Mfree(fn->nodeName);
     Mfree(fn->fullName);
-    if (fn->flags & _FILENODE_FLAG_IS_DIR)
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_IS_DIR))
     {
         if (fn->folder.children)
         {
             for (i = 0; i < fn->folder.childrenLen; i += 1)
-            {
-                _DestoryFileNode((fn->folder.children)[i]);
                 Mfree((fn->folder.children)[i]);
-            }
             Mfree(fn->folder.children);
         }
     }
 }
 
-static void _PrintFileNode(FileNode_t *fn, size_t depth)
+static void _PrintFileNode(FileNode_t *fn, void *param)
 {
     char buf[64];
     struct tm t;
-    size_t i;
 
-    printf("Node: \"%s\"\nFull: \"%s\"\nType: 0x%08x\nParent: \"%s\"\n", fn->nodeName, fn->fullName, fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
-    if (fn->flags & _FILENODE_FLAG_IS_DIR)
-    {
+    param = param;
+    printf("Node: \"%s\"\nFull: \"%s\"\nFlag: 0x%08x\nParent: \"%s\"\n", fn->nodeName, fn->fullName, fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_IS_DIR))
         printf("Children count: %u\n\n", (unsigned int)fn->folder.childrenLen);
-        if (fn->folder.children)
-            for (i = 0; i < fn->folder.childrenLen; i += 1)
-                _PrintFileNode((fn->folder.children)[i], depth + 1);
-    }
     else
     {
         t = *localtime(&(fn->file.timeLastModification));
         strftime(buf, sizeof(buf), "%Y/%m/%d %H:%M:%S", &t);
-        printf("CRC32: 0x%08x\nMTime: %s\nSize: %u\n\n", fn->file.crc32, buf, (unsigned int)fn->file.size);
+        printf("CRC32: 0x%08X\nMTime: %s\nSize: %u\n\n", fn->file.crc32, buf, (unsigned int)fn->file.size);
     }
 }
 
@@ -424,20 +433,18 @@ static void _FileNodeToMemoryBlock(FileNode_t *fn, MemoryBlock_t *mb)
     unsigned char flagsUC[4];
 
     MWriteString(&nodeM, fn->nodeName);
-    flagsM.ptr = flagsUC;
-    flagsM.size = sizeof(flagsUC);
     MWriteU32(flagsUC, fn->flags);
+    _AutoVariableToMemoryBlock(&flagsM, flagsUC, sizeof(flagsUC));
 
-    if (fn->flags & _FILENODE_FLAG_IS_DIR)
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_IS_DIR))
     {
         MemoryBlock_t countM;
         unsigned char countUC[8];
         MemoryBlock_t *results;
         size_t i;
 
-        countM.ptr = countUC;
-        countM.size = sizeof(countUC);
         MWriteU64(countUC, fn->folder.childrenLen);
+        _AutoVariableToMemoryBlock(&countM, countUC, sizeof(countUC));
 
         results = Mmalloc(sizeof(*results) * (fn->folder.childrenLen + 3));
         memcpy(results + 0, &nodeM, sizeof(*results));
@@ -454,20 +461,19 @@ static void _FileNodeToMemoryBlock(FileNode_t *fn, MemoryBlock_t *mb)
     }
     else
     {
-        MemoryBlock_t sizeM, mtimeM, crc32M;
-        unsigned char sizeUC[8], mtimeUC[8], crc32UC[4];
+        MemoryBlock_t sizeM, mtimeM, crc32M, verM;
+        unsigned char sizeUC[8], mtimeUC[8], crc32UC[4], verUC[4];
 
-        sizeM.ptr = sizeUC;
-        sizeM.size = sizeof(sizeUC);
         MWriteU64(sizeUC, fn->file.size);
-        mtimeM.ptr = mtimeUC;
-        mtimeM.size = sizeof(mtimeUC);
+        _AutoVariableToMemoryBlock(&sizeM, sizeUC, sizeof(sizeUC));
         MWriteU64(mtimeUC, fn->file.timeLastModification);
-        crc32M.ptr = crc32UC;
-        crc32M.size = sizeof(crc32UC);
+        _AutoVariableToMemoryBlock(&mtimeM, mtimeUC, sizeof(mtimeUC));
         MWriteU32(crc32UC, fn->file.crc32);
+        _AutoVariableToMemoryBlock(&crc32M, crc32UC, sizeof(crc32UC));
+        MWriteU32(verUC, fn->file.version);
+        _AutoVariableToMemoryBlock(&verM, verUC, sizeof(verUC));
 
-        MMConcat(mb, 5, &nodeM, &flagsM, &sizeM, &mtimeM, &crc32M);
+        MMConcat(mb, 6, &nodeM, &flagsM, &sizeM, &mtimeM, &crc32M, &verM);
     }
     MBfree(&nodeM);
 }
@@ -497,7 +503,7 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
     fn->parent = parent;
     fn->flags = (unsigned int)flagsU32;
 
-    if (fn->flags & _FILENODE_FLAG_IS_DIR)
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_IS_DIR))
     {
         uint64_t countU64;
         FileNode_t *child;
@@ -521,16 +527,8 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
             child = _FileNodeFromMemoryBlock(fn, fn->fullName, ptr, maxLength);
             if (child == NULL)
             {
-                size_t j;
-                for (j = 0; j < i; j += 1)
-                {
-                    _DestoryFileNode((fn->folder.children)[j]);
-                    Mfree((fn->folder.children)[j]);
-                }
-                Mfree(fn->folder.children);
-                Mfree(node);
-                Mfree(fn->fullName);
-                Mfree(fn);
+                fn->folder.childrenLen = i;
+                _FileNodeTraverse(fn, NULL, _DestoryFileNode);
                 return NULL;
             }
             (fn->folder.children)[i] = child;
@@ -539,11 +537,11 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
     else
     {
         uint64_t sizeU64, mtimeU64;
-        uint32_t crc32U32;
+        uint32_t crc32U32, verU32;
 
-        if ((*maxLength) < sizeof(sizeU64) + sizeof(mtimeU64) + sizeof(crc32U32))
+        if ((*maxLength) < sizeof(sizeU64) + sizeof(mtimeU64) + sizeof(crc32U32) + sizeof(verU32))
         {
-            _DestoryFileNode(fn);
+            _FileNodeTraverse(fn, NULL, _DestoryFileNode);
             Mfree(fn);
             return NULL;
         }
@@ -551,11 +549,13 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
         sizeU64 = MReadU64(ptr);
         mtimeU64 = MReadU64(ptr);
         crc32U32 = MReadU32(ptr);
-        (*maxLength) -= (sizeof(sizeU64) + sizeof(mtimeU64) + sizeof(crc32U32));
+        verU32 = MReadU32(ptr);
+        (*maxLength) -= (sizeof(sizeU64) + sizeof(mtimeU64) + sizeof(crc32U32) + sizeof(verU32));
 
         fn->file.size = (size_t)sizeU64;
         fn->file.timeLastModification = (time_t)mtimeU64;
         fn->file.crc32 = crc32U32;
+        fn->file.version = verU32;
     }
 
     return fn;
@@ -563,15 +563,19 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
 
 static void _FileTreeConstructAfterLoadingFromMemoryBlock(FileTree_t *t)
 {
+    Reconstruct_internal_object_t io;
     TC_t Files, Folders;
     size_t i;
 
     TCInit(&Files);
     TCInit(&Folders);
 
+    io.files = &Files;
+    io.folders = &Folders;
+
     if (t->baseChildren)
         for (i = 0; i < t->baseChildrenLen; i += 1)
-            _FileTreeConstructAfterLoadingFromMemoryBlock_Node(t->baseChildren[i], &Files, &Folders);
+            _FileNodeTraverse(t->baseChildren[i], &io, _FileTreeConstructAfterLoadingFromMemoryBlock_Node);
 
     TCTransform(&Files);
     TCTransform(&Folders);
@@ -583,18 +587,14 @@ static void _FileTreeConstructAfterLoadingFromMemoryBlock(FileTree_t *t)
     TCDeInit(&Folders);
 }
 
-static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, TC_t *files, TC_t *folders)
+static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, void *param)
 {
-    size_t i;
+    Reconstruct_internal_object_t *io = (Reconstruct_internal_object_t *)param;
 
-    if (fn->flags & _FILENODE_FLAG_IS_DIR)
-    {
-        TCAdd(folders, fn);
-        for (i = 0; i < fn->folder.childrenLen; i += 1)
-            _FileTreeConstructAfterLoadingFromMemoryBlock_Node((fn->folder.children)[i], files, folders);
-    }
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_IS_DIR))
+        TCAdd(io->folders, fn);
     else
-        TCAdd(files, fn);
+        TCAdd(io->files, fn);
 }
 
 static size_t _DuplicateStorageFromTCTransformed(FileNode_t ***base, TC_t *tc)
@@ -612,4 +612,15 @@ static void _AutoVariableToMemoryBlock(MemoryBlock_t *mb, void *ptr, size_t size
 {
     mb->ptr = ptr;
     mb->size = size;
+}
+
+static void _FileNodeTraverse(FileNode_t *fn, void *param, void (*traverser)(FileNode_t *fn, void *param))
+{
+    size_t i;
+
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_IS_DIR))
+        for (i = 0; i < fn->folder.childrenLen; i += 1)
+            _FileNodeTraverse((fn->folder.children)[i], param, traverser);
+
+    traverser(fn, param);
 }
