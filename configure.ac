@@ -1,7 +1,7 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-AC_INIT([OpenSync], [0.0.0.1], [neol_d2022@outlook.com])
+AC_INIT([OpenSync], [0.0.0.2], [neol_d2022@outlook.com])
 AM_INIT_AUTOMAKE
 AC_CONFIG_SRCDIR([crc32.c])
 AC_CONFIG_HEADERS([config.h])
