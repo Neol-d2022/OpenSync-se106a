@@ -68,7 +68,7 @@ int filetree_test(void)
     printf("T4:\t%p returned", t2);
     if (t2)
     {
-        printf(", with total files count %u and total folders cout %u...", (unsigned int)t2->totalFilesLen, (unsigned int)t2->totalFoldersLen);
+        printf(", with total files count %u and total folders count %u...", (unsigned int)t2->totalFilesLen, (unsigned int)t2->totalFoldersLen);
         if (t.totalFilesLen == t2->totalFilesLen && t.totalFoldersLen == t2->totalFoldersLen)
             printf("PASSED\n");
         else
@@ -100,7 +100,7 @@ int filetree_test(void)
     printf("T5:\t%p returned", t2);
     if (t2)
     {
-        printf(", with total files count %u and total folders cout %u...", (unsigned int)t2->totalFilesLen, (unsigned int)t2->totalFoldersLen);
+        printf(", with total files count %u and total folders count %u...", (unsigned int)t2->totalFilesLen, (unsigned int)t2->totalFoldersLen);
         printf("TEST FAILED\n");
         FileTreeDeInit(t2);
         Mfree(t2);
@@ -182,10 +182,49 @@ int filetree_test(void)
     remove("TestAdd.txt");
     FileTreeScan(t3);
     FileTreeComputeCRC32(t3);
+    MBfree(&mb2);
+    FileTreeToMemoryblock(t3, &mb2);
 
-    printf("Testing FileTreeDiff() one file removed after adding two.\n");
+    printf("Testing FileTreeDiff() one file removed.\n");
     r2 = FileTreeDiff(t2, t3);
     printf("T8:\t%u returned", r2);
+
+    if (r2 == 1)
+    {
+        printf("...PASSED\n");
+    }
+    else
+    {
+        printf("...TEST FAILED\n");
+        FileTreeDeInit(t2);
+        Mfree(t2);
+        FileTreeDeInit(t3);
+        Mfree(t3);
+        MBfree(&mb);
+        MBfree(&mb2);
+        return 1;
+    }
+
+    FileTreeDeInit(t2);
+    Mfree(t2);
+    FileTreeDeInit(t3);
+    Mfree(t3);
+
+    t2 = FileTreeFromMemoryBlock(&mb2, ".");
+    t3 = (FileTree_t *)Mmalloc(sizeof(*t3));
+    FileTreeInit(t3);
+    FileTreeSetBasePath(t3, ".");
+    f = fopen("TestAdd2.txt", "wb");
+    if (f)
+    {
+        fwrite("Modification Test", strlen("Modification Test"), 1, f);
+        fclose(f);
+    }
+    FileTreeScan(t3);
+    FileTreeComputeCRC32(t3);
+    printf("Testing FileTreeDiff() one file modified.\n");
+    r2 = FileTreeDiff(t2, t3);
+    printf("T9:\t%u returned", r2);
 
     if (r2 == 1)
     {
@@ -212,7 +251,7 @@ int filetree_test(void)
     MBfree(&mb2);
     j = MDebug();
     printf("Testing Memory Leaks.\n");
-    printf("T9:\tExpected = %u, Actual = %u...", (unsigned int)i, (unsigned int)j);
+    printf("T10:\tExpected = %u, Actual = %u...", (unsigned int)i, (unsigned int)j);
     if (i == j)
         printf("PASSED\n");
     else

@@ -377,6 +377,8 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
             /* File exist in the new tree, check if it has been modified */
 
             fn2 = *_fn;
+            idx = ((size_t)_fn - (size_t)(t_new->indexes[_INDEX_TABLE_FILE][_INDEX_FILE_FULLNAME])) / sizeof(*_fn);
+
             if (!_FLAG_ISSET(fn2->flags, _FILENODE_FLAG_CRC_VALID))
             {
                 /* We cannot tell if it has been modified */
@@ -386,13 +388,12 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
             {
                 /* Content has been modified */
                 _FLAG_SET(fn1->flags, _FILENODE_FLAG_MODIFIED);
-                checked[2][i] = 1;
+                checked[2][i] = checked[3][idx] = 1;
                 diffCount += 1;
             }
             else
             {
                 /* Nothing changed */
-                idx = ((size_t)_fn - (size_t)(t_new->indexes[_INDEX_TABLE_FILE][_INDEX_FILE_FULLNAME])) / sizeof(*_fn);
                 checked[2][i] = checked[3][idx] = 1;
             }
         }
