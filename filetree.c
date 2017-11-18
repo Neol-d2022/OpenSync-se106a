@@ -23,7 +23,8 @@
 #define _FILENODE_FLAG_DELETED 0x00000008
 #define _FILENODE_FLAG_MODIFIED 0x00000010
 #define _FILENODE_FLAG_MOVED_FROM 0x00000020
-#define _FILENODE_FLAG_VERSION_VALID 0x00000040
+#define _FILENODE_FLAG_MOVED_TO 0x00000040
+#define _FILENODE_FLAG_VERSION_VALID 0x00000080
 
 #define _FLAG_SET(f, x) ((f) |= (x))
 #define _FLAG_RESET(f, x) ((f) &= (~(x)))
@@ -32,6 +33,30 @@
 #define _FILE_TYPE_UNKNOWN 0
 #define _FILE_TYPE_REGULAR 1
 #define _FILE_TYPE_FOLDER 2
+
+#define _INDEX_TABLE_FILE 0
+#define _INDEX_TABLE_FOLDER 1
+#define _INDEX_TABLE_ALL 2
+#define _INDEX_TABLES 3
+
+#define _INDEX_FILE_NAME 0
+#define _INDEX_FILE_FULLNAME 1
+#define _INDEX_FILE_SIZE 2
+#define _INDEX_FILE_MTIME 3
+#define _INDEX_FILE_CRC32 4
+#define _INDEX_FILE_VERSION 5
+#define _INDEX_FILE_TRACK 6
+#define _INDEX_FILE_NUMBER 7
+
+#define _INDEX_FOLDER_NAME 0
+#define _INDEX_FOLDER_FULLNAME 1
+#define _INDEX_FOLDER_NUMBER 2
+
+#define _INDEX_ALL_NAME 0
+#define _INDEX_ALL_FULLNAME 1
+#define _INDEX_ALL_NUMBER 2
+
+static const size_t _INDEX_TABLE_LENGTHS[_INDEX_TABLES] = {_INDEX_FILE_NUMBER, _INDEX_FOLDER_NUMBER, _INDEX_ALL_NUMBER};
 
 static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles, TC_t *FNFolders);
 static char *_PathConcat(const char *parent, const char *filename);
@@ -46,12 +71,63 @@ static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, v
 static size_t _DuplicateStorageFromTCTransformed(FileNode_t ***base, TC_t *tc);
 static void _AutoVariableToMemoryBlock(MemoryBlock_t *mb, void *ptr, size_t size);
 static void _FileNodeTraverse(FileNode_t *fn, void *param, void (*traverser)(FileNode_t *fn, void *param));
+static void _FileTreeReleaseIndex(FileTree_t *t);
+static void _FileTreeRefreshIndex(FileTree_t *t);
+static void _FileTreeDiff_SetFlag(FileNode_t *fn, void *param);
+static int _FileNodeIsVersionChanged(FileNode_t *fn);
+
+#define _INTEGER_CMP(a, b) (((a) > (b)) ? (1) : (((a) < (b)) ? (-1) : 0))
+static int _FileNodeCmp_String(const void *a, const void *b);
+static int _FileNodeCmp_UInt32(const void *a, const void *b);
+static int _FileNodeCmp_UInt64(const void *a, const void *b);
+
+static int _FileNodeCmp_File_Name(const void *a, const void *b);
+static int _FileNodeCmp_File_FullName(const void *a, const void *b);
+static int _FileNodeCmp_File_FileSize(const void *a, const void *b);
+static int _FileNodeCmp_File_MTime(const void *a, const void *b);
+static int _FileNodeCmp_File_CRC32(const void *a, const void *b);
+static int _FileNodeCmp_File_Version(const void *a, const void *b);
+static int _FileNodeCmp_File_Track(const void *a, const void *b);
+
+static int (*_FileNodeCmp_File_indexFunctions[_INDEX_FILE_NUMBER])(const void *, const void *) = {
+    _FileNodeCmp_File_Name,
+    _FileNodeCmp_File_FullName,
+    _FileNodeCmp_File_FileSize,
+    _FileNodeCmp_File_MTime,
+    _FileNodeCmp_File_CRC32,
+    _FileNodeCmp_File_Version,
+    _FileNodeCmp_File_Track};
+
+static int _FileNodeCmp_Folder_Name(const void *a, const void *b);
+static int _FileNodeCmp_Folder_FullName(const void *a, const void *b);
+
+static int (*_FileNodeCmp_Folder_indexFunctions[_INDEX_FOLDER_NUMBER])(const void *, const void *) = {
+    _FileNodeCmp_Folder_Name,
+    _FileNodeCmp_Folder_FullName};
+
+static int _FileNodeCmp_All_Name(const void *a, const void *b);
+static int _FileNodeCmp_All_FullName(const void *a, const void *b);
+
+static int (*_FileNodeCmp_All_indexFunctions[_INDEX_ALL_NUMBER])(const void *, const void *) = {
+    _FileNodeCmp_All_Name,
+    _FileNodeCmp_All_FullName};
+
+static int (**_FileNodeCmp_indexTables[_INDEX_TABLES])(const void *, const void *) = {
+    _FileNodeCmp_File_indexFunctions,
+    _FileNodeCmp_Folder_indexFunctions,
+    _FileNodeCmp_All_indexFunctions};
 
 typedef struct
 {
     TC_t *files;
     TC_t *folders;
 } Reconstruct_internal_object_t;
+
+typedef struct
+{
+    unsigned int mask;
+    unsigned char mode;
+} FileTreeDiff_SetFlag_internal_object_t;
 
 void FileTreeInit(FileTree_t *t)
 {
@@ -63,6 +139,7 @@ void FileTreeDeInit(FileTree_t *t)
 {
     size_t i;
 
+    _FileTreeReleaseIndex(t);
     Mfree(t->basePath);
     if (t->baseChildren)
     {
@@ -93,6 +170,7 @@ int FileTreeScan(FileTree_t *t)
     TCInit(&FNs);
     TCInit(&Files);
     TCInit(&Folders);
+
     r = _FileTreeScanRecursive(t->basePath, &FNs, &Files, &Folders);
 
     TCTransform(&FNs);
@@ -106,6 +184,9 @@ int FileTreeScan(FileTree_t *t)
     TCDeInit(&FNs);
     TCDeInit(&Files);
     TCDeInit(&Folders);
+
+    _FileTreeRefreshIndex(t);
+
     return r;
 }
 
@@ -184,6 +265,7 @@ FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath)
         (t->baseChildren)[i] = child;
     }
 
+    t->indexes = NULL;
     _FileTreeConstructAfterLoadingFromMemoryBlock(t);
     return t;
 }
@@ -218,6 +300,162 @@ int FileTreeComputeCRC32(FileTree_t *t)
     }
 
     return r;
+}
+
+unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
+{
+    size_t IndexLength[2][_INDEX_TABLES] = {
+        {t_old->totalFilesLen,
+         t_old->totalFoldersLen,
+         t_old->totalFilesLen + t_old->totalFoldersLen},
+        {t_new->totalFilesLen,
+         t_new->totalFoldersLen,
+         t_new->totalFilesLen + t_new->totalFoldersLen}};
+    unsigned char *checked[4];
+    FileTreeDiff_SetFlag_internal_object_t sfio;
+    size_t i, n, idx;
+    FileNode_t *fn1, *fn2, **_fn;
+    unsigned int diffCount = 0;
+
+    checked[0] = (unsigned char *)Mmalloc(t_old->totalFoldersLen);
+    checked[1] = (unsigned char *)Mmalloc(t_new->totalFoldersLen);
+    checked[2] = (unsigned char *)Mmalloc(t_old->totalFilesLen);
+    checked[3] = (unsigned char *)Mmalloc(t_new->totalFilesLen);
+
+    memset(checked[0], 0, t_old->totalFoldersLen);
+    memset(checked[1], 0, t_new->totalFoldersLen);
+    memset(checked[2], 0, t_old->totalFilesLen);
+    memset(checked[3], 0, t_new->totalFilesLen);
+
+    n = t_old->totalFoldersLen;
+    for (i = 0; i < n; i += 1)
+    {
+        fn1 = t_old->totalFolders[i];
+        _fn = (FileNode_t **)bsearch(&fn1, t_new->indexes[_INDEX_TABLE_FOLDER][_INDEX_FOLDER_FULLNAME], IndexLength[1][_INDEX_TABLE_FOLDER], sizeof(***(t_new->indexes)), _FileNodeCmp_indexTables[_INDEX_TABLE_FOLDER][_INDEX_FOLDER_FULLNAME]);
+        if (_fn)
+        {
+            /* We found the corresponding folder in the new tree */
+            idx = ((size_t)_fn - (size_t)(t_new->indexes[_INDEX_TABLE_FOLDER][_INDEX_FOLDER_FULLNAME])) / sizeof(*_fn);
+            checked[0][i] = checked[1][idx] = 1;
+        }
+        else
+        {
+            /* We cannot found the corresponding folder in new tree, assuming the folder was deleted */
+            sfio.mask = _FILENODE_FLAG_DELETED;
+            sfio.mode = 1;
+            _FileNodeTraverse(fn1, &sfio, _FileTreeDiff_SetFlag);
+            checked[0][i] = 1;
+            diffCount += 1;
+        }
+    }
+
+    n = t_new->totalFoldersLen;
+    for (i = 0; i < n; i += 1)
+    {
+        if (!(checked[1][i]))
+        {
+            /* The folder has not been searched. Must be newly created */
+            fn2 = t_new->indexes[_INDEX_TABLE_FOLDER][_INDEX_FOLDER_FULLNAME][i];
+            sfio.mask = _FILENODE_FLAG_CREATED;
+            sfio.mode = 1;
+            _FileNodeTraverse(fn2, &sfio, _FileTreeDiff_SetFlag);
+            checked[1][i] = 1;
+            diffCount += 1;
+        }
+    }
+
+    n = t_old->totalFilesLen;
+    for (i = 0; i < n; i += 1)
+    {
+        fn1 = t_old->totalFiles[i];
+
+        /* Check the full path */
+        _fn = (FileNode_t **)bsearch(&fn1, t_new->indexes[_INDEX_TABLE_FILE][_INDEX_FILE_FULLNAME], IndexLength[1][_INDEX_TABLE_FILE], sizeof(***(t_new->indexes)), _FileNodeCmp_indexTables[_INDEX_TABLE_FILE][_INDEX_FILE_FULLNAME]);
+
+        if (_fn)
+        {
+            /* File exist in the new tree, check if it has been modified */
+
+            fn2 = *_fn;
+            if (!_FLAG_ISSET(fn2->flags, _FILENODE_FLAG_CRC_VALID))
+            {
+                /* We cannot tell if it has been modified */
+                abort();
+            }
+            else if (_FileNodeCmp_indexTables[_INDEX_TABLE_FILE][_INDEX_FILE_TRACK](&fn1, &fn2))
+            {
+                /* Content has been modified */
+                _FLAG_SET(fn1->flags, _FILENODE_FLAG_MODIFIED);
+                checked[2][i] = 1;
+                diffCount += 1;
+            }
+            else
+            {
+                /* Nothing changed */
+                idx = ((size_t)_fn - (size_t)(t_new->indexes[_INDEX_TABLE_FILE][_INDEX_FILE_FULLNAME])) / sizeof(*_fn);
+                checked[2][i] = checked[3][idx] = 1;
+            }
+        }
+        else
+        {
+            /* We found nothing. The file may be deleted or moved. Assuming the file has been removed. */
+            if (!_FLAG_ISSET(fn1->flags, _FILENODE_FLAG_DELETED))
+                _FLAG_SET(fn1->flags, _FILENODE_FLAG_DELETED);
+            checked[2][i] = 1;
+            diffCount += 1;
+        }
+    }
+
+    n = t_new->totalFilesLen;
+    for (i = 0; i < n; i += 1)
+    {
+        if (!checked[3][i])
+        {
+            /* The file has not been searched. Must be newly created */
+            fn2 = t_new->indexes[_INDEX_TABLE_FILE][_INDEX_FILE_FULLNAME][i];
+            _FLAG_SET(fn2->flags, _FILENODE_FLAG_CREATED);
+            diffCount += 1;
+        }
+    }
+
+    Mfree(checked[0]);
+    Mfree(checked[1]);
+    Mfree(checked[2]);
+    Mfree(checked[3]);
+
+    n = t_old->totalFilesLen;
+    for (i = 0; i < n; i += 1)
+    {
+        fn1 = t_old->totalFiles[i];
+        if (_FileNodeIsVersionChanged(fn1))
+            _PrintFileNode(fn1, NULL);
+    }
+
+    n = t_old->totalFoldersLen;
+    for (i = 0; i < n; i += 1)
+    {
+        fn1 = t_old->totalFolders[i];
+        if (_FileNodeIsVersionChanged(fn1))
+            _PrintFileNode(fn1, NULL);
+    }
+
+    n = t_new->totalFilesLen;
+    for (i = 0; i < n; i += 1)
+    {
+        fn2 = t_new->totalFiles[i];
+        if (_FileNodeIsVersionChanged(fn2))
+            _PrintFileNode(fn2, NULL);
+    }
+
+    n = t_new->totalFoldersLen;
+    for (i = 0; i < n; i += 1)
+    {
+        fn2 = t_new->totalFolders[i];
+        if (_FileNodeIsVersionChanged(fn2))
+            _PrintFileNode(fn2, NULL);
+    }
+
+    return diffCount;
 }
 
 // ============================
@@ -417,8 +655,25 @@ static void _PrintFileNode(FileNode_t *fn, void *param)
 
     param = param;
     printf("Node: \"%s\"\nFull: \"%s\"\nFlag: 0x%08x\nParent: \"%s\"\n", fn->nodeName, fn->fullName, fn->flags, (fn->parent) ? (fn->parent->nodeName) : ("<NONE>"));
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_CRC_VALID))
+        printf("File CRC32 is valid.\n");
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_CREATED))
+        printf("File/Folder is newly created (Diff).\n");
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_DELETED))
+        printf("File/Folder is deleted (Diff).\n");
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_MODIFIED))
+        printf("File/Folder is modified (Diff).\n");
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_MOVED_FROM))
+        printf("File/Folder is moved from here (Diff).\n");
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_MOVED_TO))
+        printf("File/Folder is moved to here (Diff).\n");
+    if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_VERSION_VALID))
+        printf("File/Folder version is valid (Diff).\n");
     if (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_IS_DIR))
+    {
+        printf("It is a folder.\n");
         printf("Children count: %u\n\n", (unsigned int)fn->folder.childrenLen);
+    }
     else
     {
         t = *localtime(&(fn->file.timeLastModification));
@@ -585,6 +840,8 @@ static void _FileTreeConstructAfterLoadingFromMemoryBlock(FileTree_t *t)
 
     TCDeInit(&Files);
     TCDeInit(&Folders);
+
+    _FileTreeRefreshIndex(t);
 }
 
 static void _FileTreeConstructAfterLoadingFromMemoryBlock_Node(FileNode_t *fn, void *param)
@@ -623,4 +880,152 @@ static void _FileNodeTraverse(FileNode_t *fn, void *param, void (*traverser)(Fil
             _FileNodeTraverse((fn->folder.children)[i], param, traverser);
 
     traverser(fn, param);
+}
+
+static int _FileNodeCmp_String(const void *a, const void *b)
+{
+    return strcmp((const char *)a, (const char *)b);
+}
+
+static int _FileNodeCmp_UInt32(const void *a, const void *b)
+{
+    uint32_t c = *(uint32_t *)a;
+    uint32_t d = *(uint32_t *)b;
+
+    return _INTEGER_CMP(c, d);
+}
+
+static int _FileNodeCmp_UInt64(const void *a, const void *b)
+{
+    uint64_t c = *(uint64_t *)a;
+    uint64_t d = *(uint64_t *)b;
+
+    return _INTEGER_CMP(c, d);
+}
+
+static int _FileNodeCmp_All_Name(const void *a, const void *b)
+{
+    return _FileNodeCmp_String((*(FileNode_t **)a)->nodeName, (*(FileNode_t **)b)->nodeName);
+}
+
+static int _FileNodeCmp_All_FullName(const void *a, const void *b)
+{
+    return _FileNodeCmp_String((*(FileNode_t **)a)->fullName, (*(FileNode_t **)b)->fullName);
+}
+
+static int _FileNodeCmp_File_Name(const void *a, const void *b)
+{
+    return _FileNodeCmp_All_Name(a, b);
+}
+
+static int _FileNodeCmp_File_FullName(const void *a, const void *b)
+{
+    return _FileNodeCmp_All_FullName(a, b);
+}
+
+static int _FileNodeCmp_File_FileSize(const void *a, const void *b)
+{
+    uint64_t c = (*(FileNode_t **)a)->file.size, d = (*(FileNode_t **)b)->file.size;
+    return _FileNodeCmp_UInt64(&c, &d);
+}
+
+static int _FileNodeCmp_File_MTime(const void *a, const void *b)
+{
+    uint64_t c = (*(FileNode_t **)a)->file.timeLastModification, d = (*(FileNode_t **)b)->file.timeLastModification;
+    return _FileNodeCmp_UInt64(&c, &d);
+}
+
+static int _FileNodeCmp_File_CRC32(const void *a, const void *b)
+{
+    return _FileNodeCmp_UInt32(&((*(FileNode_t **)a)->file.crc32), &((*(FileNode_t **)b)->file.crc32));
+}
+
+static int _FileNodeCmp_File_Version(const void *a, const void *b)
+{
+    return _FileNodeCmp_UInt32(&((*(FileNode_t **)a)->file.version), &((*(FileNode_t **)b)->file.version));
+}
+
+static int _FileNodeCmp_Folder_Name(const void *a, const void *b)
+{
+    return _FileNodeCmp_All_Name(a, b);
+}
+
+static int _FileNodeCmp_Folder_FullName(const void *a, const void *b)
+{
+    return _FileNodeCmp_All_FullName(a, b);
+}
+
+static int _FileNodeCmp_File_Track(const void *a, const void *b)
+{
+    int c;
+
+    c = _FileNodeCmp_File_CRC32(a, b);
+    if (c)
+        return c;
+    else
+        return _FileNodeCmp_File_FileSize(a, b);
+}
+
+static void _FileTreeReleaseIndex(FileTree_t *t)
+{
+    size_t i, j, n;
+
+    if (t->indexes)
+    {
+        for (i = 0; i < _INDEX_TABLES; i += 1)
+        {
+            n = _INDEX_TABLE_LENGTHS[i];
+            for (j = 0; j < n; j += 1)
+            {
+                Mfree(t->indexes[i][j]);
+            }
+            Mfree(t->indexes[i]);
+        }
+        Mfree(t->indexes);
+    }
+}
+
+static void _FileTreeRefreshIndex(FileTree_t *t)
+{
+    size_t IndexLength[_INDEX_TABLES] = {t->totalFilesLen, t->totalFoldersLen, t->totalFilesLen + t->totalFoldersLen};
+    FileNode_t **IndexSource[_INDEX_TABLES] = {t->totalFiles, t->totalFolders, NULL};
+    FileNode_t **IndexSourceAll;
+    size_t i, j, n;
+
+    _FileTreeReleaseIndex(t);
+
+    IndexSourceAll = (FileNode_t **)Mmalloc(sizeof(*IndexSourceAll) * IndexLength[_INDEX_TABLE_ALL]);
+    memcpy(IndexSourceAll, IndexSource[_INDEX_TABLE_FILE], sizeof(*IndexSourceAll) * IndexLength[_INDEX_TABLE_FILE]);
+    memcpy(IndexSourceAll + IndexLength[_INDEX_TABLE_FILE], IndexSource[_INDEX_TABLE_FOLDER], sizeof(*IndexSourceAll) * IndexLength[_INDEX_TABLE_FOLDER]);
+    IndexSource[_INDEX_TABLE_ALL] = IndexSourceAll;
+
+    t->indexes = (FileNode_t ****)Mmalloc(sizeof(*(t->indexes)) * _INDEX_TABLES);
+    for (i = 0; i < _INDEX_TABLES; i += 1)
+    {
+        n = _INDEX_TABLE_LENGTHS[i];
+        t->indexes[i] = (FileNode_t ***)Mmalloc(sizeof(**(t->indexes)) * n);
+        for (j = 0; j < n; j += 1)
+        {
+            t->indexes[i][j] = (FileNode_t **)Mmalloc(sizeof(***(t->indexes)) * IndexLength[i]);
+            memcpy(t->indexes[i][j], IndexSource[i], sizeof(***(t->indexes)) * IndexLength[i]);
+            qsort(t->indexes[i][j], IndexLength[i], sizeof(***(t->indexes)), _FileNodeCmp_indexTables[i][j]);
+        }
+    }
+
+    Mfree(IndexSourceAll);
+}
+
+static void _FileTreeDiff_SetFlag(FileNode_t *fn, void *param)
+{
+    FileTreeDiff_SetFlag_internal_object_t *io = (FileTreeDiff_SetFlag_internal_object_t *)param;
+
+    if (io->mode)
+        _FLAG_SET(fn->flags, io->mask);
+    else
+        _FLAG_RESET(fn->flags, io->mask);
+}
+
+static int _FileNodeIsVersionChanged(FileNode_t *fn)
+{
+    return (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_CREATED) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_DELETED) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_MODIFIED) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_MOVED_FROM) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_MOVED_TO)) ? (1) : (0);
 }

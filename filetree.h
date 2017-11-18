@@ -42,6 +42,7 @@ typedef struct FileNode_struct_t
 typedef struct
 {
     char *basePath;
+    FileNode_t ****indexes;
     FileNode_t **baseChildren;
     FileNode_t **totalFiles;
     FileNode_t **totalFolders;
@@ -73,5 +74,8 @@ FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath);
 
 /* Compute CRC32 of every files under the tree */
 int FileTreeComputeCRC32(FileTree_t *t);
+
+/* Compute Difference */
+unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new);
 
 #endif
