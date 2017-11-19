@@ -302,7 +302,7 @@ int FileTreeComputeCRC32(FileTree_t *t)
     return r;
 }
 
-unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
+unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new, FileNodeDiff_t ***diff, size_t *diffLen)
 {
     size_t IndexLength[2][_INDEX_TABLES] = {
         {t_old->totalFilesLen,
@@ -311,9 +311,11 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
         {t_new->totalFilesLen,
          t_new->totalFoldersLen,
          t_new->totalFilesLen + t_new->totalFoldersLen}};
+    TC_t _diff;
     unsigned char *checked[4];
     FileTreeDiff_SetFlag_internal_object_t sfio;
-    size_t i, n, idx;
+    FileNodeDiff_t *fnd;
+    size_t i, n, idx, m;
     FileNode_t *fn1, *fn2, **_fn;
     unsigned int diffCount = 0;
 
@@ -326,6 +328,8 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
     memset(checked[1], 0, t_new->totalFoldersLen);
     memset(checked[2], 0, t_old->totalFilesLen);
     memset(checked[3], 0, t_new->totalFilesLen);
+
+    TCInit(&_diff);
 
     n = t_old->totalFoldersLen;
     for (i = 0; i < n; i += 1)
@@ -346,6 +350,10 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
             _FileNodeTraverse(fn1, &sfio, _FileTreeDiff_SetFlag);
             checked[0][i] = 1;
             diffCount += 1;
+            fnd = (FileNodeDiff_t *)Mmalloc(sizeof(*fnd));
+            fnd->from = fn1;
+            fnd->to = NULL;
+            TCAdd(&_diff, fnd);
         }
     }
 
@@ -361,6 +369,10 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
             _FileNodeTraverse(fn2, &sfio, _FileTreeDiff_SetFlag);
             checked[1][i] = 1;
             diffCount += 1;
+            fnd = (FileNodeDiff_t *)Mmalloc(sizeof(*fnd));
+            fnd->from = NULL;
+            fnd->to = fn2;
+            TCAdd(&_diff, fnd);
         }
     }
 
@@ -388,8 +400,13 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
             {
                 /* Content has been modified */
                 _FLAG_SET(fn1->flags, _FILENODE_FLAG_MODIFIED);
+                _FLAG_SET(fn2->flags, _FILENODE_FLAG_MODIFIED);
                 checked[2][i] = checked[3][idx] = 1;
                 diffCount += 1;
+                fnd = (FileNodeDiff_t *)Mmalloc(sizeof(*fnd));
+                fnd->from = fn1;
+                fnd->to = fn2;
+                TCAdd(&_diff, fnd);
             }
             else
             {
@@ -404,6 +421,10 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
                 _FLAG_SET(fn1->flags, _FILENODE_FLAG_DELETED);
             checked[2][i] = 1;
             diffCount += 1;
+            fnd = (FileNodeDiff_t *)Mmalloc(sizeof(*fnd));
+            fnd->from = fn1;
+            fnd->to = NULL;
+            TCAdd(&_diff, fnd);
         }
     }
 
@@ -416,6 +437,10 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
             fn2 = t_new->indexes[_INDEX_TABLE_FILE][_INDEX_FILE_FULLNAME][i];
             _FLAG_SET(fn2->flags, _FILENODE_FLAG_CREATED);
             diffCount += 1;
+            fnd = (FileNodeDiff_t *)Mmalloc(sizeof(*fnd));
+            fnd->from = NULL;
+            fnd->to = fn2;
+            TCAdd(&_diff, fnd);
         }
     }
 
@@ -424,39 +449,49 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new)
     Mfree(checked[2]);
     Mfree(checked[3]);
 
-    n = t_old->totalFilesLen;
-    for (i = 0; i < n; i += 1)
-    {
-        fn1 = t_old->totalFiles[i];
-        if (_FileNodeIsVersionChanged(fn1))
-            _PrintFileNode(fn1, NULL);
-    }
-
-    n = t_old->totalFoldersLen;
-    for (i = 0; i < n; i += 1)
-    {
-        fn1 = t_old->totalFolders[i];
-        if (_FileNodeIsVersionChanged(fn1))
-            _PrintFileNode(fn1, NULL);
-    }
-
-    n = t_new->totalFilesLen;
-    for (i = 0; i < n; i += 1)
-    {
-        fn2 = t_new->totalFiles[i];
-        if (_FileNodeIsVersionChanged(fn2))
-            _PrintFileNode(fn2, NULL);
-    }
-
-    n = t_new->totalFoldersLen;
-    for (i = 0; i < n; i += 1)
-    {
-        fn2 = t_new->totalFolders[i];
-        if (_FileNodeIsVersionChanged(fn2))
-            _PrintFileNode(fn2, NULL);
-    }
+    n = TCCount(&_diff);
+    TCTransform(&_diff);
+    *diff = (FileNodeDiff_t **)Mmalloc(sizeof(**diff) * n);
+    memcpy(*diff, _diff.fixedStorage.storage, sizeof(**diff) * n);
+    TCDeInit(&_diff);
+    *diffLen = n;
 
     return diffCount;
+}
+
+void FileNodeDiffRelease(FileNodeDiff_t **diff, size_t len)
+{
+    size_t i;
+
+    if (diff)
+    {
+        for (i = 0; i < len; i += 1)
+            Mfree(diff[i]);
+        Mfree(diff);
+    }
+}
+
+void FileNodeDiffDebugPrint(FileNodeDiff_t **diff, size_t len)
+{
+    size_t i;
+
+    if (diff)
+    {
+        for (i = 0; i < len; i += 1)
+        {
+            printf("From Node:\n");
+            if (diff[i]->from)
+                _PrintFileNode(diff[i]->from, NULL);
+            else
+                printf("<NULL>\n\n");
+
+            printf("To Node:\n");
+            if (diff[i]->to)
+                _PrintFileNode(diff[i]->to, NULL);
+            else
+                printf("<NULL>\n\n");
+        }
+    }
 }
 
 // ============================

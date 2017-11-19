@@ -6,8 +6,9 @@
 
 int filetree_test(void)
 {
+    FileNodeDiff_t **diff = NULL;
     MemoryBlock_t mb, mb2;
-    size_t i, j;
+    size_t i, j, k;
     FileTree_t t, *t2, *t3;
     FILE *f;
     int r;
@@ -113,12 +114,12 @@ int filetree_test(void)
     }
 
     printf("Testing FileTreeDiff()\n");
-
     mb.size += 1;
     t2 = FileTreeFromMemoryBlock(&mb, ".");
     t3 = FileTreeFromMemoryBlock(&mb, ".");
 
-    r2 = FileTreeDiff(t2, t3);
+    r2 = FileTreeDiff(t2, t3, &diff, &k);
+    FileNodeDiffDebugPrint(diff, k);
     printf("T6:\t%u returned", r2);
     if (r2)
     {
@@ -128,6 +129,7 @@ int filetree_test(void)
         FileTreeDeInit(t3);
         Mfree(t3);
         MBfree(&mb);
+        FileNodeDiffRelease(diff, k);
         return 1;
     }
     else
@@ -137,6 +139,7 @@ int filetree_test(void)
     Mfree(t2);
     FileTreeDeInit(t3);
     Mfree(t3);
+    FileNodeDiffRelease(diff, k);
 
     t2 = FileTreeFromMemoryBlock(&mb, ".");
     t3 = (FileTree_t *)Mmalloc(sizeof(*t3));
@@ -152,7 +155,8 @@ int filetree_test(void)
     FileTreeComputeCRC32(t3);
     FileTreeToMemoryblock(t3, &mb2);
     printf("Testing FileTreeDiff() two files added.\n");
-    r2 = FileTreeDiff(t2, t3);
+    r2 = FileTreeDiff(t2, t3, &diff, &k);
+    FileNodeDiffDebugPrint(diff, k);
     printf("T7:\t%u returned", r2);
     if (r2 == 2)
     {
@@ -167,6 +171,7 @@ int filetree_test(void)
         Mfree(t3);
         MBfree(&mb);
         MBfree(&mb2);
+        FileNodeDiffRelease(diff, k);
         return 1;
     }
 
@@ -174,6 +179,7 @@ int filetree_test(void)
     Mfree(t2);
     FileTreeDeInit(t3);
     Mfree(t3);
+    FileNodeDiffRelease(diff, k);
 
     t2 = FileTreeFromMemoryBlock(&mb2, ".");
     t3 = (FileTree_t *)Mmalloc(sizeof(*t3));
@@ -186,9 +192,9 @@ int filetree_test(void)
     FileTreeToMemoryblock(t3, &mb2);
 
     printf("Testing FileTreeDiff() one file removed.\n");
-    r2 = FileTreeDiff(t2, t3);
+    r2 = FileTreeDiff(t2, t3, &diff, &k);
+    FileNodeDiffDebugPrint(diff, k);
     printf("T8:\t%u returned", r2);
-
     if (r2 == 1)
     {
         printf("...PASSED\n");
@@ -202,6 +208,7 @@ int filetree_test(void)
         Mfree(t3);
         MBfree(&mb);
         MBfree(&mb2);
+        FileNodeDiffRelease(diff, k);
         return 1;
     }
 
@@ -209,6 +216,7 @@ int filetree_test(void)
     Mfree(t2);
     FileTreeDeInit(t3);
     Mfree(t3);
+    FileNodeDiffRelease(diff, k);
 
     t2 = FileTreeFromMemoryBlock(&mb2, ".");
     t3 = (FileTree_t *)Mmalloc(sizeof(*t3));
@@ -223,9 +231,9 @@ int filetree_test(void)
     FileTreeScan(t3);
     FileTreeComputeCRC32(t3);
     printf("Testing FileTreeDiff() one file modified.\n");
-    r2 = FileTreeDiff(t2, t3);
+    r2 = FileTreeDiff(t2, t3, &diff, &k);
+    FileNodeDiffDebugPrint(diff, k);
     printf("T9:\t%u returned", r2);
-
     if (r2 == 1)
     {
         printf("...PASSED\n");
@@ -239,6 +247,7 @@ int filetree_test(void)
         Mfree(t3);
         MBfree(&mb);
         MBfree(&mb2);
+        FileNodeDiffRelease(diff, k);
         return 1;
     }
 
@@ -246,6 +255,7 @@ int filetree_test(void)
     Mfree(t2);
     FileTreeDeInit(t3);
     Mfree(t3);
+    FileNodeDiffRelease(diff, k);
 
     MBfree(&mb);
     MBfree(&mb2);

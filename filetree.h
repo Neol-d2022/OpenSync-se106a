@@ -13,6 +13,9 @@
 /* MemoryBlock_t */
 #include "mb.h"
 
+/* TC_t */
+#include "transformcontainer.h"
+
 typedef struct
 {
     size_t size;
@@ -51,6 +54,12 @@ typedef struct
     size_t totalFoldersLen;
 } FileTree_t;
 
+typedef struct
+{
+    FileNode_t *from;
+    FileNode_t *to;
+} FileNodeDiff_t;
+
 /* Initialize a file tree */
 void FileTreeInit(FileTree_t *t);
 
@@ -76,6 +85,12 @@ FileTree_t *FileTreeFromMemoryBlock(MemoryBlock_t *mb, const char *parentPath);
 int FileTreeComputeCRC32(FileTree_t *t);
 
 /* Compute Difference */
-unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new);
+unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new, FileNodeDiff_t ***diff, size_t *diffLen);
+
+/* Release Object */
+void FileNodeDiffRelease(FileNodeDiff_t **diff, size_t len);
+
+/* DEBUG. Print file node difference */
+void FileNodeDiffDebugPrint(FileNodeDiff_t **diff, size_t len);
 
 #endif
