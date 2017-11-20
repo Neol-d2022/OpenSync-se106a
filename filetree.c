@@ -74,7 +74,7 @@ static void _FileNodeTraverse(FileNode_t *fn, void *param, void (*traverser)(Fil
 static void _FileTreeReleaseIndex(FileTree_t *t);
 static void _FileTreeRefreshIndex(FileTree_t *t);
 static void _FileTreeDiff_SetFlag(FileNode_t *fn, void *param);
-static int _FileNodeIsVersionChanged(FileNode_t *fn);
+//static int _FileNodeIsVersionChanged(FileNode_t *fn);
 
 #define _INTEGER_CMP(a, b) (((a) > (b)) ? (1) : (((a) < (b)) ? (-1) : 0))
 static int _FileNodeCmp_String(const void *a, const void *b);
@@ -315,7 +315,7 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new, FileNodeDiff_t *
     unsigned char *checked[4];
     FileTreeDiff_SetFlag_internal_object_t sfio;
     FileNodeDiff_t *fnd;
-    size_t i, n, idx, m;
+    size_t i, n, idx;
     FileNode_t *fn1, *fn2, **_fn;
     unsigned int diffCount = 0;
 
@@ -1061,7 +1061,7 @@ static void _FileTreeDiff_SetFlag(FileNode_t *fn, void *param)
         _FLAG_RESET(fn->flags, io->mask);
 }
 
-static int _FileNodeIsVersionChanged(FileNode_t *fn)
+/*static int _FileNodeIsVersionChanged(FileNode_t *fn)
 {
     return (_FLAG_ISSET(fn->flags, _FILENODE_FLAG_CREATED) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_DELETED) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_MODIFIED) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_MOVED_FROM) || _FLAG_ISSET(fn->flags, _FILENODE_FLAG_MOVED_TO)) ? (1) : (0);
-}
+}*/

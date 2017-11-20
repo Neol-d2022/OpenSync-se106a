@@ -29,7 +29,7 @@ char *SMConcat(size_t n, ...)
     char *r;
     const char **s;
     size_t *l;
-    size_t i, c, d;
+    size_t i, c;
     va_list list;
 
     c = 0;
@@ -66,6 +66,7 @@ char *SMConcatA(size_t n, const char **array)
     r = _SMConcatA(n, array, l, c);
 
     Mfree(l);
+    return r;
 }
 
 // ==========================
