@@ -1,0 +1,13 @@
+server
+base_path=.
+magic_number=888888
+listening_port=5555
+server
+base_path=.
+magic_number=888888
+listening_port=5555
+server
+base_path=.
+magic_number=888888
+listening_port=5555
+

@@ -1,0 +1,5 @@
+server
+base_path=.  
+remote_ip=127.0.0.1  
+remote_port=12345  
+magic_number=999999  
