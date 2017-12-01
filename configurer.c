@@ -1,10 +1,14 @@
-#include <stdio.h>
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "strings.h"
+#include "client.h"
 #include "configurer.h"
 #include "mm.h"
+#include "server.h"
+#include "strings.h"
 #include "transformcontainer.h"
 
 #define _CONFIG_FLAG_BASE_PATH_SET 0x00000001
@@ -96,6 +100,7 @@ int ConfigurerReadConfig(const char *filename, Configuration_t *c)
                 else
                 {
                     client = (SynchronizationClient_t *)Mmalloc(sizeof(*client));
+                    memset(client, 0, sizeof(*client));
                     basePath = &(client->basePath);
                     remoteIP = &(client->remoteIP);
                     remotePort = &(client->remotePort);
@@ -110,6 +115,7 @@ int ConfigurerReadConfig(const char *filename, Configuration_t *c)
                 else
                 {
                     server = (SynchronizationServer_t *)Mmalloc(sizeof(*server));
+                    memset(server, 0, sizeof(*server));
                     basePath = &(server->basePath);
                     remoteIP = NULL;
                     remotePort = NULL;
@@ -229,6 +235,33 @@ void ConfigurerRelease(Configuration_t *c)
         }
         Mfree(c->servers);
     }
+
+    if (c->sp)
+    {
+        size_t i;
+        void *ret;
+        int r;
+
+        Mfree(c->sp);
+
+        for (i = 0; i < c->nClients; i += 1)
+        {
+            pthread_cancel((c->clientThreads)[i]);
+            r = pthread_join((c->clientThreads)[i], &ret);
+            if (r)
+                abort();
+        }
+        Mfree(c->clientThreads);
+
+        for (i = 0; i < c->nServers; i += 1)
+        {
+            pthread_cancel((c->serverThreads)[i]);
+            r = pthread_join((c->serverThreads)[i], &ret);
+            if (r)
+                abort();
+        }
+        Mfree(c->serverThreads);
+    }
 }
 
 void ConfigurerDebugPrint(Configuration_t *c)
@@ -243,6 +276,75 @@ void ConfigurerDebugPrint(Configuration_t *c)
         _PrintServer((c->servers)[i]);
 }
 
+int ConfigurerStartup(Configuration_t *c)
+{
+    char idbuf[16];
+    void *ret;
+    size_t i, j;
+    int r;
+
+    c->sp = (SynchronizationProtocols_t *)Mmalloc(sizeof(*(c->sp)));
+    c->clientThreads = (pthread_t *)Mmalloc(sizeof(*(c->clientThreads)) * c->nClients);
+    c->serverThreads = (pthread_t *)Mmalloc(sizeof(*(c->serverThreads)) * c->nServers);
+
+    SyncProtBeforeInitialization(c->sp);
+    for (i = 0; i < c->nClients; i += 1)
+    {
+        (c->clients)[i]->sp = c->sp;
+        sprintf(idbuf, "%u", (c->clients)[i]->magicNumber);
+        (c->clients)[i]->workingFolder = SConcat("Client-", idbuf);
+        r = pthread_create(c->clientThreads + i, NULL, ClientThreadEntry, (c->clients)[i]);
+        if (r)
+        {
+            for (j = 0; j < i; j += 1)
+            {
+                pthread_cancel((c->clientThreads)[j]);
+                pthread_join((c->clientThreads)[j], &ret);
+            }
+            SyncProtAfterInitialization(c->sp);
+            Mfree(c->sp);
+            Mfree(c->clientThreads);
+            Mfree(c->serverThreads);
+            c->sp = NULL;
+            c->clientThreads = NULL;
+            c->serverThreads = NULL;
+            return r;
+        }
+    }
+
+    for (i = 0; i < c->nServers; i += 1)
+    {
+        (c->servers)[i]->sp = c->sp;
+        sprintf(idbuf, "%u", (c->servers)[i]->magicNumber);
+        (c->servers)[i]->workingFolder = SConcat("Server-", idbuf);
+        r = pthread_create(c->serverThreads + i, NULL, ServerThreadEntry, (c->servers)[i]);
+        if (r)
+        {
+            for (j = 0; j < c->nClients; j += 1)
+            {
+                pthread_cancel((c->clientThreads)[j]);
+                pthread_join((c->clientThreads)[j], &ret);
+            }
+            for (j = 0; j < i; j += 1)
+            {
+                pthread_cancel((c->serverThreads)[j]);
+                pthread_join((c->serverThreads)[j], &ret);
+            }
+            SyncProtAfterInitialization(c->sp);
+            Mfree(c->sp);
+            Mfree(c->clientThreads);
+            Mfree(c->serverThreads);
+            c->sp = NULL;
+            c->clientThreads = NULL;
+            c->serverThreads = NULL;
+            return r;
+        }
+    }
+
+    SyncProtAfterInitialization(c->sp);
+    return 0;
+}
+
 // ==========================
 // Local Function Definitions
 // ==========================
@@ -251,11 +353,15 @@ static void _ReleaseClient(SynchronizationClient_t *client)
 {
     Mfree(client->basePath);
     Mfree(client->remoteIP);
+    if (client->workingFolder)
+        Mfree(client->workingFolder);
 }
 
 static void _ReleaseServer(SynchronizationServer_t *server)
 {
     Mfree(server->basePath);
+    if (server->workingFolder)
+        Mfree(server->workingFolder);
 }
 
 static int _Trim_fgets(char *str)

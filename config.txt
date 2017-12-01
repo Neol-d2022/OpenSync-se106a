@@ -1,0 +1,9 @@
+client
+base_path = .
+remote_ip = 127.0.0.1
+remote_port = 12345
+magic_number = 999999
+server
+base_path = .
+magic_number  = 888888
+listening_port = 5555

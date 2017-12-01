@@ -44,5 +44,27 @@ int configurer_test()
         }
     }
 
+    m1 = MDebug();
+
+    ConfigurerReadConfig("config.txt", &c);
+    ConfigurerDebugPrint(&c);
+    printf("Reading config file: \"%s\", try to start service\n", "config.txt");
+    if (ConfigurerStartup(&c) != 0)
+    {
+        ConfigurerRelease(&c);
+        printf("TEST FAILED\n");
+        return 1;
+    }
+    ConfigurerRelease(&c);
+    m2 = MDebug();
+    printf("Testing memory leaks...\nExpected = %u, Actual = %u...", (unsigned int)m1, (unsigned int)m2);
+    if (m1 == m2)
+        printf("PASSED\n");
+    else
+    {
+        printf("TEST FAILED\n");
+        return 1;
+    }
+
     return 0;
 }

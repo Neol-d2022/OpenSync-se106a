@@ -1,21 +1,16 @@
-#include <string.h>
-#include <stdlib.h>
 #include <dirent.h>
-#include <sys/stat.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
+#include "crc32.h"
+#include "dirmanager.h"
 #include "filetree.h"
 #include "mm.h"
 #include "strings.h"
 #include "transformcontainer.h"
-#include "crc32.h"
-
-#ifdef _WIN32
-#define kPathSeparator '\\'
-#else
-#define kPathSeparator '/'
-#endif
 
 #define _FILENODE_FLAG_IS_DIR 0x00000001
 #define _FILENODE_FLAG_CRC_VALID 0x00000002
@@ -59,8 +54,6 @@
 static const size_t _INDEX_TABLE_LENGTHS[_INDEX_TABLES] = {_INDEX_FILE_NUMBER, _INDEX_FOLDER_NUMBER, _INDEX_ALL_NUMBER};
 
 static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles, TC_t *FNFolders);
-static char *_PathConcat(const char *parent, const char *filename);
-static int _IsPathSeparator(const char *c);
 static int _GetFileStat(const char *fullPath, int *result, FileNodeTypeFile_t *fnfile);
 static void _DestoryFileNode(FileNode_t *fn, void *param);
 static void _PrintFileNode(FileNode_t *fn, void *param);
@@ -306,11 +299,11 @@ unsigned int FileTreeDiff(FileTree_t *t_old, FileTree_t *t_new, FileNodeDiff_t *
 {
     size_t IndexLength[2][_INDEX_TABLES] = {
         {t_old->totalFilesLen,
-         t_old->totalFoldersLen,
-         t_old->totalFilesLen + t_old->totalFoldersLen},
+            t_old->totalFoldersLen,
+            t_old->totalFilesLen + t_old->totalFoldersLen},
         {t_new->totalFilesLen,
-         t_new->totalFoldersLen,
-         t_new->totalFilesLen + t_new->totalFoldersLen}};
+            t_new->totalFoldersLen,
+            t_new->totalFilesLen + t_new->totalFoldersLen}};
     TC_t _diff;
     unsigned char *checked[4];
     FileTreeDiff_SetFlag_internal_object_t sfio;
@@ -533,7 +526,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
                 else if (strcmp(dp->d_name, "..") == 0)
                     continue;
 
-                fileFullPath = _PathConcat(fullPath, dp->d_name);
+                fileFullPath = DirManagerPathConcat(fullPath, dp->d_name);
                 if (!_GetFileStat(fileFullPath, &ft, &fnfile))
                 {
                     switch (ft)
@@ -584,7 +577,7 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
     for (i = 0; i < n; i += 1)
     {
         fn = (FileNode_t *)TCI(&DIRs, i);
-        fileFullPath = _PathConcat(fullPath, fn->nodeName);
+        fileFullPath = DirManagerPathConcat(fullPath, fn->nodeName);
         TCInit(&SubDIR);
         s = _FileTreeScanRecursive(fileFullPath, &SubDIR, FNFiles, FNFolders);
         if (s)
@@ -599,49 +592,6 @@ static int _FileTreeScanRecursive(const char *fullPath, TC_t *FNs, TC_t *FNFiles
 
     TCDeInit(&DIRs);
     return r;
-}
-
-static char *_PathConcat(const char *parent, const char *filename)
-{
-    static const char kPathSeparatorString[] = {kPathSeparator, '\0'};
-    size_t a;
-    unsigned int nSeparators = 0;
-
-    a = strlen(parent);
-
-    if (a > 0)
-        if (_IsPathSeparator(parent + a - 1))
-            nSeparators += 1;
-
-    if (_IsPathSeparator(filename))
-        nSeparators += 1;
-
-    switch (nSeparators)
-    {
-    case 0:
-        return SMConcat(3, parent, kPathSeparatorString, filename);
-        break;
-    case 1:
-        return SConcat(parent, filename);
-        break;
-    case 2:
-        return SConcat(parent, filename + 1);
-        break;
-    default:
-        abort();
-    }
-
-    return NULL;
-}
-
-static int _IsPathSeparator(const char *c)
-{
-    if (*c == '/')
-        return 1;
-    else if (*c == '\\')
-        return 1;
-    else
-        return 0;
 }
 
 static int _GetFileStat(const char *fullPath, int *result, FileNodeTypeFile_t *fnfile)
@@ -790,7 +740,7 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
 
     fn = (FileNode_t *)Mmalloc(sizeof(*fn));
     fn->nodeName = node;
-    fn->fullName = _PathConcat(parentPath, node);
+    fn->fullName = DirManagerPathConcat(parentPath, node);
     fn->parent = parent;
     fn->flags = (unsigned int)flagsU32;
 
