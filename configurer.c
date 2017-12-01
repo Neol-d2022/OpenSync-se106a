@@ -300,6 +300,7 @@ int ConfigurerStartup(Configuration_t *c)
             {
                 pthread_cancel((c->clientThreads)[j]);
                 pthread_join((c->clientThreads)[j], &ret);
+                Mfree((c->clients)[j]->workingFolder);
             }
             SyncProtAfterInitialization(c->sp);
             Mfree(c->sp);
@@ -324,11 +325,13 @@ int ConfigurerStartup(Configuration_t *c)
             {
                 pthread_cancel((c->clientThreads)[j]);
                 pthread_join((c->clientThreads)[j], &ret);
+                Mfree((c->clients)[j]->workingFolder);
             }
             for (j = 0; j < i; j += 1)
             {
                 pthread_cancel((c->serverThreads)[j]);
                 pthread_join((c->serverThreads)[j], &ret);
+                Mfree((c->servers)[j]->workingFolder);
             }
             SyncProtAfterInitialization(c->sp);
             Mfree(c->sp);
