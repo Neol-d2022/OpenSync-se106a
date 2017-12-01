@@ -14,8 +14,9 @@ void *ServerThreadEntry(void *arg)
 
     SyncProtWaitForInitialization(server->sp);
     if (_CreateWorkingFolder(server))
-        return NULL;
+        pthread_exit(NULL);
 
+    pthread_exit(NULL);
     return NULL;
 }
 

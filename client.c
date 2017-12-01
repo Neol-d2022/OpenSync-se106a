@@ -14,8 +14,9 @@ void *ClientThreadEntry(void *arg)
 
     SyncProtWaitForInitialization(client->sp);
     if (_CreateWorkingFolder(client))
-        return NULL;
+        pthread_exit(NULL);
 
+    pthread_exit(NULL);
     return NULL;
 }
 
