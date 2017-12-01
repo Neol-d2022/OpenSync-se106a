@@ -12,6 +12,7 @@ AC_PROG_INSTALL
 
 # Checks for libraries.
 AC_CHECK_LIB([pthread], [pthread_rwlock_init])
+AC_CHECK_LIB([ws2_32], [main])
 
 # Checks for header files.
 AC_CHECK_HEADERS([stddef.h stdint.h stdlib.h string.h unistd.h])
