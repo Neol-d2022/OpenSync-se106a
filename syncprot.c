@@ -18,4 +18,5 @@ void SyncProtAfterInitialization(SynchronizationProtocols_t *sp)
 void SyncProtWaitForInitialization(SynchronizationProtocols_t *sp)
 {
     pthread_rwlock_rdlock(&(sp->startupLock));
+    pthread_rwlock_unlock(&(sp->startupLock));
 }
