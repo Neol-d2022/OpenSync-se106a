@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <unistd.h> /* Needed for close() */
 typedef int SOCKET;
+#define INVALID_SOCKET (-1)
 
 #endif
 

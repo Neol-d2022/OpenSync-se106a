@@ -15,9 +15,9 @@ static int _selfTest(void)
         return 1;
     if (filetree_test())
         return 1;
-    if (configurer_test())
-        return 1;
     if (socketLibInit())
+        return 1;
+    if (configurer_test())
         return 1;
     return 0;
 }

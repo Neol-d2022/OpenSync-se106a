@@ -216,26 +216,6 @@ void ConfigurerRelease(Configuration_t *c)
 {
     size_t i;
 
-    if (c->clients)
-    {
-        for (i = 0; i < c->nClients; i += 1)
-        {
-            _ReleaseClient((c->clients)[i]);
-            Mfree((c->clients)[i]);
-        }
-        Mfree(c->clients);
-    }
-
-    if (c->servers)
-    {
-        for (i = 0; i < c->nServers; i += 1)
-        {
-            _ReleaseServer((c->servers)[i]);
-            Mfree((c->servers)[i]);
-        }
-        Mfree(c->servers);
-    }
-
     if (c->sp)
     {
         size_t i;
@@ -261,6 +241,26 @@ void ConfigurerRelease(Configuration_t *c)
                 abort();
         }
         Mfree(c->serverThreads);
+    }
+
+    if (c->clients)
+    {
+        for (i = 0; i < c->nClients; i += 1)
+        {
+            _ReleaseClient((c->clients)[i]);
+            Mfree((c->clients)[i]);
+        }
+        Mfree(c->clients);
+    }
+
+    if (c->servers)
+    {
+        for (i = 0; i < c->nServers; i += 1)
+        {
+            _ReleaseServer((c->servers)[i]);
+            Mfree((c->servers)[i]);
+        }
+        Mfree(c->servers);
     }
 }
 
@@ -288,6 +288,31 @@ int ConfigurerStartup(Configuration_t *c)
     c->serverThreads = (pthread_t *)Mmalloc(sizeof(*(c->serverThreads)) * c->nServers);
 
     SyncProtBeforeInitialization(c->sp);
+    for (i = 0; i < c->nServers; i += 1)
+    {
+        (c->servers)[i]->sp = c->sp;
+        sprintf(idbuf, "%u", (c->servers)[i]->magicNumber);
+        (c->servers)[i]->workingFolder = SConcat("Server-", idbuf);
+        r = pthread_create(c->serverThreads + i, NULL, ServerThreadEntry, (c->servers)[i]);
+        if (r)
+        {
+            for (j = 0; j < i; j += 1)
+            {
+                pthread_cancel((c->serverThreads)[j]);
+                pthread_join((c->serverThreads)[j], &ret);
+                Mfree((c->servers)[j]->workingFolder);
+            }
+            SyncProtAfterInitialization(c->sp);
+            Mfree(c->sp);
+            Mfree(c->clientThreads);
+            Mfree(c->serverThreads);
+            c->sp = NULL;
+            c->clientThreads = NULL;
+            c->serverThreads = NULL;
+            return r;
+        }
+    }
+
     for (i = 0; i < c->nClients; i += 1)
     {
         (c->clients)[i]->sp = c->sp;
@@ -302,32 +327,7 @@ int ConfigurerStartup(Configuration_t *c)
                 pthread_join((c->clientThreads)[j], &ret);
                 Mfree((c->clients)[j]->workingFolder);
             }
-            SyncProtAfterInitialization(c->sp);
-            Mfree(c->sp);
-            Mfree(c->clientThreads);
-            Mfree(c->serverThreads);
-            c->sp = NULL;
-            c->clientThreads = NULL;
-            c->serverThreads = NULL;
-            return r;
-        }
-    }
-
-    for (i = 0; i < c->nServers; i += 1)
-    {
-        (c->servers)[i]->sp = c->sp;
-        sprintf(idbuf, "%u", (c->servers)[i]->magicNumber);
-        (c->servers)[i]->workingFolder = SConcat("Server-", idbuf);
-        r = pthread_create(c->serverThreads + i, NULL, ServerThreadEntry, (c->servers)[i]);
-        if (r)
-        {
-            for (j = 0; j < c->nClients; j += 1)
-            {
-                pthread_cancel((c->clientThreads)[j]);
-                pthread_join((c->clientThreads)[j], &ret);
-                Mfree((c->clients)[j]->workingFolder);
-            }
-            for (j = 0; j < i; j += 1)
+            for (j = 0; j < c->nServers; j += 1)
             {
                 pthread_cancel((c->serverThreads)[j]);
                 pthread_join((c->serverThreads)[j], &ret);

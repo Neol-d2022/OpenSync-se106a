@@ -20,3 +20,11 @@ void SyncProtWaitForInitialization(SynchronizationProtocols_t *sp)
     pthread_rwlock_rdlock(&(sp->startupLock));
     pthread_rwlock_unlock(&(sp->startupLock));
 }
+
+int SyncProtSetCancelable(void)
+{
+    int oldState;
+
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldState);
+    return oldState;
+}
