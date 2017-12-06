@@ -121,7 +121,7 @@ static int _HandleIncomingClient(Listener_t *listenerInstance)
     ServingData_t *sd;
     pthread_t servingThread;
     SOCKET s = listenerInstance->s, c;
-    int addrlen;
+    socklen_t addrlen;
 
     addrlen = sizeof(clientInfo);
     c = accept(s, (struct sockaddr *)&clientInfo, &addrlen);

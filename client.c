@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "configurer.h"
 #include "dirmanager.h"
