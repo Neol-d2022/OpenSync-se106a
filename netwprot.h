@@ -8,7 +8,7 @@
 
 #define NETWPROT_SM_TYPE_LENGTH 2
 #define NETWPROT_SM_LENGTH_LENGTH 2
-#define NETWPROT_SM_INITIAL_BUFFER_LENGTH ((NETWPROT_SM_TYPE_LENGTH) > (NETWPROT_SM_LENGTH_LENGTH) ? (NETWPROT_SM_TYPE_LENGTH) : (NETWPROT_SM_LENGTH_LENGTH))
+
 typedef struct
 {
     uint16_t messageType;
@@ -17,6 +17,7 @@ typedef struct
 } SocketMessage_t;
 
 int NetwProtReadFrom(SOCKET s, SocketMessage_t *sm, struct timeval *timeout);
-int NetwProtSendTo(SOCKET s, SocketMessage_t *sm);
+int NetwProtSendTo(SOCKET s, const SocketMessage_t *sm);
+void NetwProtFreeSocketMesg(SocketMessage_t *sm);
 
 #endif

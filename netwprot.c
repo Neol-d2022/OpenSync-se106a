@@ -9,7 +9,7 @@ static int _RawReadSocket(SOCKET s, void *buf, int desiredLength, int *actualLen
 static int _ReadUint16(SOCKET s, uint16_t *out, struct timeval *timeout);
 static void _BufferToUInt16(unsigned char *buf, size_t length, uint16_t *out);
 static unsigned char *_ReadRawData(SOCKET s, int length, struct timeval *timeout);
-static int _RawWriteSocket(SOCKET s, void *buf, int length);
+static int _RawWriteSocket(SOCKET s, const void *buf, int length);
 static int _SendUInt16(SOCKET s, uint16_t data);
 
 int NetwProtReadFrom(SOCKET s, SocketMessage_t *sm, struct timeval *timeout)
@@ -23,7 +23,7 @@ int NetwProtReadFrom(SOCKET s, SocketMessage_t *sm, struct timeval *timeout)
     return 0;
 }
 
-int NetwProtSendTo(SOCKET s, SocketMessage_t *sm)
+int NetwProtSendTo(SOCKET s, const SocketMessage_t *sm)
 {
     if (_SendUInt16(s, sm->messageType))
         return 1;
@@ -33,6 +33,15 @@ int NetwProtSendTo(SOCKET s, SocketMessage_t *sm)
         return 1;
     return 0;
 }
+
+void NetwProtFreeSocketMesg(SocketMessage_t *sm)
+{
+    Mfree(sm->message);
+}
+
+// ==========================
+// Local Function Definitions
+// ==========================
 
 static int _RawReadSocket(SOCKET s, void *buf, int desiredLength, int *actualLength, struct timeval *timeout)
 {
@@ -121,7 +130,7 @@ _ReadRawData_Fail:
     return NULL;
 }
 
-static int _RawWriteSocket(SOCKET s, void *buf, int length)
+static int _RawWriteSocket(SOCKET s, const void *buf, int length)
 {
     int r;
 
