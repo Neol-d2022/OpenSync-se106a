@@ -7,18 +7,21 @@
 #include "configurer.h"
 #include "dirmanager.h"
 #include "mm.h"
+#include "netwprot.h"
 #include "syncprot.h"
 #include "xsocket.h"
 
 typedef struct
 {
     SOCKET s;
+    SynchronizationServer_t *server;
 } Listener_t;
 
 typedef struct
 {
     SOCKET clientSocket;
     struct sockaddr_in clientInfo;
+    SynchronizationServer_t *server;
 } ServingData_t;
 
 static int _CreateWorkingFolder(SynchronizationServer_t *server);
@@ -26,6 +29,8 @@ static int _CreateListener(SynchronizationServer_t *server, Listener_t *listener
 static void _StartAcceptClients(Listener_t *listenerInstance);
 static void *_ServingThreadEntry(void *arg);
 static int _HandleIncomingClient(Listener_t *listenerInstance);
+static int _ServerProtocol(ServingData_t *sd);
+static int _ServerProtocolHandshake(ServingData_t *sd);
 
 void *ServerThreadEntry(void *arg)
 {
@@ -61,6 +66,10 @@ static int _CreateWorkingFolder(SynchronizationServer_t *server)
     return 0;
 }
 
+// ==========================
+// Local Function Definitions
+// ==========================
+
 static int _CreateListener(SynchronizationServer_t *server, Listener_t *listenerInstance)
 {
     struct sockaddr_in serverInfo;
@@ -87,6 +96,7 @@ static int _CreateListener(SynchronizationServer_t *server, Listener_t *listener
     }
 
     listenerInstance->s = s;
+    listenerInstance->server = server;
     return 0;
 }
 
@@ -129,6 +139,7 @@ static int _HandleIncomingClient(Listener_t *listenerInstance)
     {
         sd = (ServingData_t *)Mmalloc(sizeof(*sd));
         sd->clientSocket = c;
+        sd->server = listenerInstance->server;
         memcpy(&(sd->clientInfo), &clientInfo, sizeof(clientInfo));
         if (!pthread_create(&servingThread, NULL, _ServingThreadEntry, sd))
         {
@@ -151,7 +162,52 @@ static void *_ServingThreadEntry(void *arg)
 {
     ServingData_t *sd = (ServingData_t *)arg;
 
+    _ServerProtocol(sd);
     socketClose(sd->clientSocket);
     Mfree(sd);
     return NULL;
+}
+
+static int _ServerProtocol(ServingData_t *sd)
+{
+    if (_ServerProtocolHandshake(sd))
+        return 1;
+    return 0;
+}
+
+static int _ServerProtocolHandshake(ServingData_t *sd)
+{
+    SocketMessage_t sm;
+    struct timeval tv;
+    int r, s;
+    uint32_t mn;
+    unsigned char buf[sizeof(mn)];
+
+    memset(&tv, 0, sizeof(tv));
+    tv.tv_sec = NETWPROT_READ_TIMEOUT_IN_SECOND;
+    r = NetwProtReadFrom(sd->clientSocket, &sm, &tv);
+    if (r)
+        return 1;
+
+    if (sm.messageType != NETWPROT_SM_MESSAGE_TYPE_HANDSHAKE || sm.messageLength != sizeof(buf))
+    {
+        NetwProtFreeSocketMesg(&sm);
+        return 1;
+    }
+
+    NetwProtBufToUInt32(sm.message, &mn);
+    NetwProtFreeSocketMesg(&sm);
+
+    if (mn != (uint32_t)(sd->server->magicNumber))
+        r = mn = 1;
+    else
+        r = mn = 0;
+
+    NetwProtUInt32ToBuf(buf, mn);
+    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_RESPONSE;
+    sm.messageLength = sizeof(buf);
+    sm.message = buf;
+    s = NetwProtSendTo(sd->clientSocket, &sm);
+
+    return (r | s) ? 1 : 0;
 }

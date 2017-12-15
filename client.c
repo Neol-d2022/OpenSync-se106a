@@ -5,6 +5,7 @@
 
 #include "configurer.h"
 #include "dirmanager.h"
+#include "netwprot.h"
 #include "syncprot.h"
 #include "xsocket.h"
 
@@ -16,6 +17,8 @@ typedef struct
 
 static int _CreateWorkingFolder(SynchronizationClient_t *client);
 static int _CreateConnection(SynchronizationClient_t *client, ConnectionToServer_t *conn);
+static int _ClientProtocol(SynchronizationClient_t *client, ConnectionToServer_t *conn);
+static int _ClientProtocolHandshake(SynchronizationClient_t *client, ConnectionToServer_t *conn);
 
 void *ClientThreadEntry(void *arg)
 {
@@ -29,10 +32,15 @@ void *ClientThreadEntry(void *arg)
     if (_CreateConnection(client, &conn))
         pthread_exit(NULL);
 
+    _ClientProtocol(client, &conn);
     socketClose(conn.serverSocket);
     pthread_exit(NULL);
     return NULL;
 }
+
+// ==========================
+// Local Function Definitions
+// ==========================
 
 static int _CreateWorkingFolder(SynchronizationClient_t *client)
 {
@@ -76,5 +84,49 @@ static int _CreateConnection(SynchronizationClient_t *client, ConnectionToServer
     }
 
     conn->serverSocket = s;
+    return 0;
+}
+
+static int _ClientProtocol(SynchronizationClient_t *client, ConnectionToServer_t *conn)
+{
+    if (_ClientProtocolHandshake(client, conn))
+        return 1;
+    return 0;
+}
+
+static int _ClientProtocolHandshake(SynchronizationClient_t *client, ConnectionToServer_t *conn)
+{
+    SocketMessage_t sm;
+    struct timeval tv;
+    int r;
+    uint32_t mn = (uint32_t)(client->magicNumber);
+    unsigned char buf[sizeof(mn)];
+
+    NetwProtUInt32ToBuf(buf, mn);
+    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_HANDSHAKE;
+    sm.messageLength = sizeof(buf);
+    sm.message = buf;
+
+    r = NetwProtSendTo(conn->serverSocket, &sm);
+    if (r)
+        return 1;
+
+    memset(&tv, 0, sizeof(tv));
+    tv.tv_sec = NETWPROT_READ_TIMEOUT_IN_SECOND;
+    r = NetwProtReadFrom(conn->serverSocket, &sm, &tv);
+    if (r)
+        return 1;
+
+    if (sm.messageType != NETWPROT_SM_MESSAGE_TYPE_RESPONSE || sm.messageLength != sizeof(buf))
+    {
+        NetwProtFreeSocketMesg(&sm);
+        return 1;
+    }
+
+    NetwProtBufToUInt32(sm.message, &mn);
+    NetwProtFreeSocketMesg(&sm);
+    if (mn != NETWPROT_RESPONSE_OK)
+        return 1;
+
     return 0;
 }
