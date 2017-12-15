@@ -29,7 +29,7 @@ static void _clearUp(void)
 
 int main(void)
 {
-    printf("Hello, I am %s. I am currently under construction.\n", PACKAGE_STRING);
+    printf("Hello, I am %s (%s). I am currently under construction.\n", PACKAGE_NAME, PACKAGE_VERSION);
     if (_selfTest())
     {
         printf("Self test failed. Exiting now.\n");
