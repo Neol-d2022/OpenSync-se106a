@@ -1,0 +1,1 @@
+wget https://github.com/libtom/tomsfastmath/releases/download/v0.13.1/tfm-0.13.1.tar.xz && tar -xvf tfm-0.13.1.tar.xz && cd tomsfastmath-0.13.1/ && make && make install && cd ../ && rm -rf cd tomsfastmath-0.13.1/ tfm-0.13.1.tar.xz
