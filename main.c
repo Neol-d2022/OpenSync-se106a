@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <stdio.h>
 
 #include "config.h"
@@ -33,8 +34,10 @@ int main(void)
     if (_selfTest())
     {
         printf("Self test failed. Exiting now.\n");
+        //pthread_exit(NULL);
         return 1;
     }
     _clearUp();
+    //pthread_exit(NULL);
     return 0;
 }

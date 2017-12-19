@@ -5,6 +5,9 @@
 
 #include "configurer.h"
 #include "dirmanager.h"
+#include "filetree.h"
+#include "mb.h"
+#include "mm.h"
 #include "netwprot.h"
 #include "syncprot.h"
 #include "xsocket.h"
@@ -19,6 +22,7 @@ static int _CreateWorkingFolder(SynchronizationClient_t *client);
 static int _CreateConnection(SynchronizationClient_t *client, ConnectionToServer_t *conn);
 static int _ClientProtocol(SynchronizationClient_t *client, ConnectionToServer_t *conn);
 static int _ClientProtocolHandshake(SynchronizationClient_t *client, ConnectionToServer_t *conn);
+static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, ConnectionToServer_t *conn);
 
 void *ClientThreadEntry(void *arg)
 {
@@ -91,6 +95,8 @@ static int _ClientProtocol(SynchronizationClient_t *client, ConnectionToServer_t
 {
     if (_ClientProtocolHandshake(client, conn))
         return 1;
+    if (_ClientProtocolFileTreeRequest(client, conn))
+        return 1;
     return 0;
 }
 
@@ -127,6 +133,68 @@ static int _ClientProtocolHandshake(SynchronizationClient_t *client, ConnectionT
     NetwProtFreeSocketMesg(&sm);
     if (mn != NETWPROT_RESPONSE_OK)
         return 1;
+
+    return 0;
+}
+
+static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, ConnectionToServer_t *conn)
+{
+    SocketMessage_t sm;
+    struct timeval tv;
+    MemoryBlock_t mb;
+    FileTree_t *ft;
+    unsigned char *ptr;
+    size_t sizeCount;
+    uint32_t mn = 0;
+    unsigned char buf[sizeof(mn)];
+    int r;
+
+    NetwProtUInt32ToBuf(buf, mn);
+    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_FILETREE_REQUEST;
+    sm.messageLength = sizeof(buf);
+    sm.message = buf;
+
+    r = NetwProtSendTo(conn->serverSocket, &sm);
+    if (r)
+        return 1;
+
+    memset(&tv, 0, sizeof(tv));
+    tv.tv_sec = NETWPROT_READ_TIMEOUT_IN_SECOND;
+    r = NetwProtReadFrom(conn->serverSocket, &sm, &tv);
+    if (r)
+        return 1;
+
+    if (sm.messageType != NETWPROT_SM_MESSAGE_TYPE_RESPONSE || sm.messageLength <= sizeof(buf))
+    {
+        NetwProtFreeSocketMesg(&sm);
+        return 1;
+    }
+
+    ptr = sm.message;
+    sizeCount = 0;
+
+    NetwProtBufToUInt32(ptr, &mn);
+    ptr += sizeof(mn);
+    sizeCount += sizeof(mn);
+
+    if (mn != NETWPROT_RESPONSE_OK)
+    {
+        NetwProtFreeSocketMesg(&sm);
+        return 1;
+    }
+
+    mb.size = sm.messageLength - sizeCount;
+    mb.ptr = ptr;
+    ft = FileTreeFromMemoryBlock(&mb, client->basePath);
+    if (ft == NULL)
+    {
+        NetwProtFreeSocketMesg(&sm);
+        return 1;
+    }
+    FileTreeDeInit(ft);
+    Mfree(ft);
+
+    NetwProtFreeSocketMesg(&sm);
 
     return 0;
 }
