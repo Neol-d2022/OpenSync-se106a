@@ -1,3 +1,5 @@
+#include <signal.h>
+
 #include "xsocket.h"
 
 int socketLibInit(void)
@@ -6,6 +8,7 @@ int socketLibInit(void)
     WSADATA wsa_data;
     return WSAStartup(MAKEWORD(2, 2), &wsa_data);
 #else
+    signal(SIGPIPE, SIG_IGN);
     return 0;
 #endif
 }
