@@ -2,7 +2,7 @@ client
 base_path = ./ClientDir
 remote_ip = 127.0.0.1
 remote_port = 5555
-magic_number = 999999
+magic_number = 888888
 server
 base_path = ./ServerDir
 magic_number  = 888888
