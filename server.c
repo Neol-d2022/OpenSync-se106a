@@ -12,6 +12,8 @@
 #include "syncprot.h"
 #include "xsocket.h"
 
+#define _ACCEPT_CLIENT_INTERVAL_IN_SECOND 4
+
 typedef struct
 {
     FileTree_t ft;
@@ -44,6 +46,9 @@ static int _HandleIncomingClient(Listener_t *listenerInstance);
 static int _ServerProtocol(ServingData_t *sd);
 static int _ServerProtocolHandshake(ServingData_t *sd);
 static int _ServerProtocolWaitForRequest(ServingData_t *sd);
+static int _CreateListener_SetUpSocketAndLocks(SynchronizationServer_t *server, Listener_t *listenerInstance, SOCKET s);
+static void _StartAcceptClients_ResetBeforeSelect(struct timeval *tv, fd_set *fset, SOCKET s);
+static void _SetTimeout(struct timeval *tv, unsigned int seconds);
 
 static int _ServerProtocolRequestHandler_KeepAlive(void **args);
 static int _ServerProtocolRequestHandler_FileTree(void **args);
@@ -99,46 +104,25 @@ static int _CreateWorkingFolder(SynchronizationServer_t *server)
 
 static int _CreateListener(SynchronizationServer_t *server, Listener_t *listenerInstance)
 {
-    struct sockaddr_in serverInfo;
     SOCKET s;
 
     FileTreeInit(&(listenerInstance->ft));
     FileTreeSetBasePath(&(listenerInstance->ft), server->basePath);
     if (FileTreeScan(&(listenerInstance->ft)))
+    {
+        FileTreeDeInit(&(listenerInstance->ft));
         return 1;
+    }
 
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == INVALID_SOCKET)
-        return 1;
-
-    memset(&serverInfo, 0, sizeof(serverInfo));
-    serverInfo.sin_family = PF_INET;
-    serverInfo.sin_addr.s_addr = INADDR_ANY;
-    serverInfo.sin_port = htons(server->listeningPort);
-    if (bind(s, (struct sockaddr *)&serverInfo, sizeof(serverInfo)))
     {
         FileTreeDeInit(&(listenerInstance->ft));
-        socketClose(s);
         return 1;
     }
 
-    if (listen(s, SOMAXCONN))
+    if (_CreateListener_SetUpSocketAndLocks(server, listenerInstance, s))
     {
-        FileTreeDeInit(&(listenerInstance->ft));
-        socketClose(s);
-        return 1;
-    }
-
-    if (pthread_rwlock_init(&(listenerInstance->svrRwLock), NULL))
-    {
-        FileTreeDeInit(&(listenerInstance->ft));
-        socketClose(s);
-        return 1;
-    }
-
-    if (pthread_rwlock_init(&(listenerInstance->runningLock), NULL))
-    {
-        pthread_rwlock_rdlock(&(listenerInstance->svrRwLock));
         FileTreeDeInit(&(listenerInstance->ft));
         socketClose(s);
         return 1;
@@ -155,14 +139,12 @@ static void _ClearUpListener(void *arg)
     Listener_t *listenerInstance = (Listener_t *)arg;
 
     listenerInstance->stopSync = 1;
-    if (pthread_rwlock_wrlock(&(listenerInstance->runningLock)))
-        abort();
+    pthread_rwlock_wrlock(&(listenerInstance->runningLock));
     socketClose(listenerInstance->s);
     FileTreeDeInit(&(listenerInstance->ft));
-    pthread_rwlock_rdlock(&(listenerInstance->svrRwLock));
-    if (pthread_rwlock_unlock(&(listenerInstance->runningLock)))
-        abort();
-    pthread_rwlock_rdlock(&(listenerInstance->runningLock));
+    pthread_rwlock_destroy(&(listenerInstance->svrRwLock));
+    pthread_rwlock_unlock(&(listenerInstance->runningLock));
+    pthread_rwlock_destroy(&(listenerInstance->runningLock));
 }
 
 static void _StartAcceptClients(Listener_t *listenerInstance)
@@ -172,21 +154,14 @@ static void _StartAcceptClients(Listener_t *listenerInstance)
     SOCKET s = listenerInstance->s;
     int r;
 
-    FD_ZERO(&fset);
-    FD_SET(s, &fset);
-    memset(&tv, 0, sizeof(tv));
-    tv.tv_sec = 1;
-
+    _StartAcceptClients_ResetBeforeSelect(&tv, &fset, s);
     while ((r = select(s + 1, &fset, NULL, NULL, &tv)) >= 0)
     {
         if (r != 0)
             _HandleIncomingClient(listenerInstance);
 
-        FD_ZERO(&fset);
-        FD_SET(s, &fset);
-        memset(&tv, 0, sizeof(tv));
-        tv.tv_sec = 1;
         pthread_testcancel();
+        _StartAcceptClients_ResetBeforeSelect(&tv, &fset, s);
     }
 }
 
@@ -213,10 +188,7 @@ static int _HandleIncomingClient(Listener_t *listenerInstance)
         if (!pthread_create(&servingThread, NULL, _ServingThreadEntry, sd))
         {
             if (pthread_detach(servingThread))
-            {
                 abort();
-                return 1;
-            }
         }
         else
         {
@@ -224,6 +196,7 @@ static int _HandleIncomingClient(Listener_t *listenerInstance)
             return 1;
         }
     }
+
     return 0;
 }
 
@@ -233,11 +206,9 @@ static void *_ServingThreadEntry(void *arg)
     int oldstate;
 
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldstate);
-    if (pthread_rwlock_rdlock(sd->runningLock))
-        abort();
+    pthread_rwlock_rdlock(sd->runningLock);
     _ServerProtocol(sd);
-    if (pthread_rwlock_unlock(sd->runningLock))
-        abort();
+    pthread_rwlock_unlock(sd->runningLock);
     socketClose(sd->clientSocket);
     Mfree(sd);
     return NULL;
@@ -261,8 +232,7 @@ static int _ServerProtocolHandshake(ServingData_t *sd)
     uint32_t mn;
     unsigned char buf[sizeof(mn)];
 
-    memset(&tv, 0, sizeof(tv));
-    tv.tv_sec = NETWPROT_READ_TIMEOUT_IN_SECOND;
+    _SetTimeout(&tv, NETWPROT_READ_TIMEOUT_IN_SECOND);
     r = NetwProtReadFrom(sd->clientSocket, &sm, &tv);
     if (r)
         return 1;
@@ -300,8 +270,7 @@ static int _ServerProtocolWaitForRequest(ServingData_t *sd)
     if (*(sd->stopping) != 0)
         return 1;
 
-    memset(&tv, 0, sizeof(tv));
-    tv.tv_sec = NETWPROT_IDLE_TIMEOUT_SERVER_IN_SECOND;
+    _SetTimeout(&tv, NETWPROT_READ_TIMEOUT_IN_SECOND);
     r = NetwProtReadFrom(sd->clientSocket, &sm, &tv);
     if (r)
         return 1;
@@ -330,9 +299,7 @@ static int _ServerProtocolRequestHandler_KeepAlive(void **args)
     unsigned char buf[sizeof(mn)];
 
     NetwProtUInt32ToBuf(buf, mn);
-    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_RESPONSE;
-    sm.messageLength = sizeof(buf);
-    sm.message = buf;
+    NetwProtSetSM(&sm, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, sizeof(buf), buf);
 
     return NetwProtSendTo(sd->clientSocket, &sm);
 }
@@ -360,11 +327,46 @@ static int _ServerProtocolRequestHandler_FileTree(void **args)
     MMConcat(&out, 2, &bufmb, &mb);
     MBfree(&mb);
 
-    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_RESPONSE;
-    sm.messageLength = out.size;
-    sm.message = out.ptr;
+    NetwProtSetSM(&sm, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, out.size, out.ptr);
     r = NetwProtSendTo(sd->clientSocket, &sm);
 
     MBfree(&out);
     return r;
+}
+
+static int _CreateListener_SetUpSocketAndLocks(SynchronizationServer_t *server, Listener_t *listenerInstance, SOCKET s)
+{
+    struct sockaddr_in serverInfo;
+
+    memset(&serverInfo, 0, sizeof(serverInfo));
+    serverInfo.sin_family = PF_INET;
+    serverInfo.sin_addr.s_addr = INADDR_ANY;
+    serverInfo.sin_port = htons(server->listeningPort);
+
+    if (bind(s, (struct sockaddr *)&serverInfo, sizeof(serverInfo)))
+        return 1;
+    if (listen(s, SOMAXCONN))
+        return 1;
+    if (pthread_rwlock_init(&(listenerInstance->svrRwLock), NULL))
+        return 1;
+    if (pthread_rwlock_init(&(listenerInstance->runningLock), NULL))
+    {
+        pthread_rwlock_destroy(&(listenerInstance->svrRwLock));
+        return 1;
+    }
+
+    return 0;
+}
+
+static void _StartAcceptClients_ResetBeforeSelect(struct timeval *tv, fd_set *fset, SOCKET s)
+{
+    FD_ZERO(fset);
+    FD_SET(s, fset);
+    _SetTimeout(tv, _ACCEPT_CLIENT_INTERVAL_IN_SECOND);
+}
+
+static void _SetTimeout(struct timeval *tv, unsigned int seconds)
+{
+    memset(tv, 0, sizeof(*tv));
+    tv->tv_sec = seconds;
 }

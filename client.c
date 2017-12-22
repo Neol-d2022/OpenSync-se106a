@@ -23,6 +23,7 @@ static int _CreateConnection(SynchronizationClient_t *client, ConnectionToServer
 static int _ClientProtocol(SynchronizationClient_t *client, ConnectionToServer_t *conn);
 static int _ClientProtocolHandshake(SynchronizationClient_t *client, ConnectionToServer_t *conn);
 static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, ConnectionToServer_t *conn);
+static void _SetTimeout(struct timeval *tv, unsigned int seconds);
 
 void *ClientThreadEntry(void *arg)
 {
@@ -109,16 +110,12 @@ static int _ClientProtocolHandshake(SynchronizationClient_t *client, ConnectionT
     unsigned char buf[sizeof(mn)];
 
     NetwProtUInt32ToBuf(buf, mn);
-    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_HANDSHAKE;
-    sm.messageLength = sizeof(buf);
-    sm.message = buf;
-
+    NetwProtSetSM(&sm, NETWPROT_SM_MESSAGE_TYPE_HANDSHAKE, sizeof(buf), buf);
     r = NetwProtSendTo(conn->serverSocket, &sm);
     if (r)
         return 1;
 
-    memset(&tv, 0, sizeof(tv));
-    tv.tv_sec = NETWPROT_READ_TIMEOUT_IN_SECOND;
+    _SetTimeout(&tv, NETWPROT_READ_TIMEOUT_IN_SECOND);
     r = NetwProtReadFrom(conn->serverSocket, &sm, &tv);
     if (r)
         return 1;
@@ -150,16 +147,12 @@ static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, Conne
     int r;
 
     NetwProtUInt32ToBuf(buf, mn);
-    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_FILETREE_REQUEST;
-    sm.messageLength = sizeof(buf);
-    sm.message = buf;
-
+    NetwProtSetSM(&sm, NETWPROT_SM_MESSAGE_TYPE_FILETREE_REQUEST, sizeof(buf), buf);
     r = NetwProtSendTo(conn->serverSocket, &sm);
     if (r)
         return 1;
 
-    memset(&tv, 0, sizeof(tv));
-    tv.tv_sec = NETWPROT_READ_TIMEOUT_IN_SECOND;
+    _SetTimeout(&tv, NETWPROT_READ_TIMEOUT_IN_SECOND);
     r = NetwProtReadFrom(conn->serverSocket, &sm, &tv);
     if (r)
         return 1;
@@ -195,6 +188,11 @@ static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, Conne
     Mfree(ft);
 
     NetwProtFreeSocketMesg(&sm);
-
     return 0;
+}
+
+static void _SetTimeout(struct timeval *tv, unsigned int seconds)
+{
+    memset(tv, 0, sizeof(*tv));
+    tv->tv_sec = seconds;
 }

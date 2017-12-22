@@ -37,5 +37,6 @@ void NetwProtUInt16ToBuf(unsigned char *buf, uint16_t data);
 void NetwProtBufToUInt16(const unsigned char *buf, uint16_t *out);
 void NetwProtUInt32ToBuf(unsigned char *buf, uint32_t data);
 void NetwProtBufToUInt32(const unsigned char *buf, uint32_t *out);
+void NetwProtSetSM(SocketMessage_t *sm, uint16_t type, uint32_t length, unsigned char *mesg);
 
 #endif

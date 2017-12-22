@@ -17,7 +17,7 @@ int NetwProtReadFrom(SOCKET s, SocketMessage_t *sm, struct timeval *timeout)
 {
     if (_ReadUint16(s, &(sm->messageType), timeout))
         return 1;
-    if (_ReadUint16(s, &(sm->messageLength), timeout))
+    if (_ReadUint32(s, &(sm->messageLength), timeout))
         return 1;
     if ((sm->message = _ReadRawData(s, (int)(sm->messageLength), timeout)) == NULL)
         return 1;
@@ -28,7 +28,7 @@ int NetwProtSendTo(SOCKET s, const SocketMessage_t *sm)
 {
     if (_SendUInt16(s, sm->messageType))
         return 1;
-    if (_SendUInt16(s, sm->messageLength))
+    if (_SendUInt32(s, sm->messageLength))
         return 1;
     if (_RawWriteSocket(s, sm->message, sm->messageLength))
         return 1;
@@ -113,6 +113,13 @@ void NetwProtBufToUInt32(const unsigned char *buf, uint32_t *out)
     }
 
     *out = r;
+}
+
+void NetwProtSetSM(SocketMessage_t *sm, uint16_t type, uint32_t length, unsigned char *mesg)
+{
+    sm->messageType = type;
+    sm->messageLength = length;
+    sm->message = mesg;
 }
 
 // ==========================
