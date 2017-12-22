@@ -24,7 +24,7 @@
 typedef struct
 {
     uint16_t messageType;
-    uint16_t messageLength;
+    uint32_t messageLength;
     unsigned char *message;
 } SocketMessage_t;
 

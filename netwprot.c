@@ -7,9 +7,11 @@
 
 static int _RawReadSocket(SOCKET s, void *buf, int desiredLength, int *actualLength, struct timeval *timeout);
 static int _ReadUint16(SOCKET s, uint16_t *out, struct timeval *timeout);
+static int _ReadUint32(SOCKET s, uint32_t *out, struct timeval *timeout);
 static unsigned char *_ReadRawData(SOCKET s, int length, struct timeval *timeout);
 static int _RawWriteSocket(SOCKET s, const void *buf, int length);
 static int _SendUInt16(SOCKET s, uint16_t data);
+static int _SendUInt32(SOCKET s, uint32_t data);
 
 int NetwProtReadFrom(SOCKET s, SocketMessage_t *sm, struct timeval *timeout)
 {
@@ -173,6 +175,19 @@ static int _ReadUint16(SOCKET s, uint16_t *out, struct timeval *timeout)
     return 0;
 }
 
+static int _ReadUint32(SOCKET s, uint32_t *out, struct timeval *timeout)
+{
+    unsigned char buf[sizeof(*out)];
+    int retLength;
+
+    if (_RawReadSocket(s, buf, sizeof(buf), &retLength, timeout))
+        return 1;
+    if (retLength != sizeof(buf))
+        return 1;
+    NetwProtBufToUInt32(buf, out);
+    return 0;
+}
+
 static unsigned char *_ReadRawData(SOCKET s, int length, struct timeval *timeout)
 {
     unsigned char *buf;
@@ -208,6 +223,14 @@ static int _SendUInt16(SOCKET s, uint16_t data)
 {
     unsigned char buf[sizeof(data)];
     NetwProtUInt16ToBuf(buf, data);
+
+    return _RawWriteSocket(s, buf, sizeof(buf));
+}
+
+static int _SendUInt32(SOCKET s, uint32_t data)
+{
+    unsigned char buf[sizeof(data)];
+    NetwProtUInt32ToBuf(buf, data);
 
     return _RawWriteSocket(s, buf, sizeof(buf));
 }
