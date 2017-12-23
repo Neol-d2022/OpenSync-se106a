@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "configurer.h"
@@ -9,6 +10,7 @@
 #include "filetree.h"
 #include "mm.h"
 #include "netwprot.h"
+#include "strings.h"
 #include "syncprot.h"
 #include "xsocket.h"
 
@@ -37,7 +39,7 @@ typedef struct
     uint32_t *generation;
     pthread_rwlock_t *svrRwLock;
     pthread_rwlock_t *runningLock;
-    volatile const int *stopping;
+    volatile int *stopping;
 } ServingData_t;
 
 static int _CreateWorkingFolder(SynchronizationServer_t *server);
@@ -54,17 +56,26 @@ static void _StartAcceptClients_ResetBeforeSelect(struct timeval *tv, fd_set *fs
 static void _SetTimeout(struct timeval *tv, unsigned int seconds);
 static void _ReadGeneration(const char *filename, uint32_t *generation);
 static int _WriteGeneration(const char *filename, const uint32_t *generation);
+static void _PathPostfix(char *pathFromClient);
 
 static int _ServerProtocolRequestHandler_KeepAlive(void **args);
 static int _ServerProtocolRequestHandler_FileTree(void **args);
+static int _ServerProtocolRequestHandler_FileDeletedFromClient(void **args);
+static int _ServerProtocolRequestHandler_FileCreatedFromClient(void **args);
+static int _ServerProtocolRequestHandler_FileRequestFromClient(void **args);
+static int _ServerProtocolRequestHandler_FileChangedFromClient(void **args);
 
 typedef int (*_ServerProtocolRequestHandler_t)(void **args);
 static _ServerProtocolRequestHandler_t _requestHandler[NETWPROT_SM_MESSAGE_TYPE_MAX] = {
-    NULL,                                    // NULL
-    NULL,                                    // NETWPROT_SM_MESSAGE_TYPE_RESPONSE
-    NULL,                                    // NETWPROT_SM_MESSAGE_TYPE_HANDSHAKE
-    _ServerProtocolRequestHandler_KeepAlive, // NETWPROT_SM_MESSAGE_TYPE_KEEPALIVE
-    _ServerProtocolRequestHandler_FileTree,  // NETWPROT_SM_MESSAGE_TYPE_FILETREE_REQUEST
+    NULL,                                                // NULL
+    NULL,                                                // NETWPROT_SM_MESSAGE_TYPE_RESPONSE
+    NULL,                                                // NETWPROT_SM_MESSAGE_TYPE_HANDSHAKE
+    _ServerProtocolRequestHandler_KeepAlive,             // NETWPROT_SM_MESSAGE_TYPE_KEEPALIVE
+    _ServerProtocolRequestHandler_FileTree,              // NETWPROT_SM_MESSAGE_TYPE_FILETREE_REQUEST
+    _ServerProtocolRequestHandler_FileDeletedFromClient, // NETWPROT_SM_MESSAGE_TYPE_NOTIFY_FILE_DELETED
+    _ServerProtocolRequestHandler_FileCreatedFromClient, // NETWPROT_SM_MESSAGE_TYPE_NOTIFY_FILE_CREATED
+    _ServerProtocolRequestHandler_FileRequestFromClient, // NETWPROT_SM_MESSAGE_TYPE_REQUEST_FILE
+    _ServerProtocolRequestHandler_FileChangedFromClient, // NETWPROT_SM_MESSAGE_TYPE_NOTIFY_FILE_CHANGED
 };
 
 void *ServerThreadEntry(void *arg)
@@ -121,6 +132,7 @@ static int _CreateListener(SynchronizationServer_t *server, Listener_t *listener
         FileTreeDeInit(&(listenerInstance->ft));
         return 1;
     }
+    FileTreeComputeCRC32(&(listenerInstance->ft));
 
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == INVALID_SOCKET)
@@ -271,9 +283,7 @@ static int _ServerProtocolHandshake(ServingData_t *sd)
         r = mn = 0;
 
     NetwProtUInt32ToBuf(buf, mn);
-    sm.messageType = NETWPROT_SM_MESSAGE_TYPE_RESPONSE;
-    sm.messageLength = sizeof(buf);
-    sm.message = buf;
+    NetwProtSetSM(&sm, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, sizeof(buf), buf);
     s = NetwProtSendTo(sd->clientSocket, &sm);
 
     return (r | s) ? 1 : 0;
@@ -289,7 +299,7 @@ static int _ServerProtocolWaitForRequest(ServingData_t *sd)
     if (*(sd->stopping) != 0)
         return 1;
 
-    _SetTimeout(&tv, NETWPROT_READ_TIMEOUT_IN_SECOND);
+    _SetTimeout(&tv, NETWPROT_IDLE_TIMEOUT_SERVER_IN_SECOND);
     r = NetwProtReadFrom(sd->clientSocket, &sm, &tv);
     if (r)
         return 1;
@@ -426,4 +436,288 @@ static int _WriteGeneration(const char *filename, const uint32_t *generation)
     w = fwrite(p, n, 1, f);
     fclose(f);
     return (w == 1) ? 0 : 1;
+}
+
+static int _ServerProtocolRequestHandler_FileDeletedFromClient(void **args)
+{
+    SocketMessage_t res;
+    char *fullname;
+    char *realpath;
+    unsigned char *ptr;
+    size_t maxSize;
+    ServingData_t *sd = args[0];
+    SocketMessage_t *sm = args[1];
+    uint32_t g;
+    uint32_t mn = 0;
+    unsigned char buf[sizeof(mn)];
+    int r;
+
+    ptr = sm->message;
+    maxSize = sm->messageLength;
+
+    NetwProtBufToUInt32(ptr, &g);
+    ptr += sizeof(g);
+    maxSize -= sizeof(g);
+    fullname = MReadString((void **)&ptr, &maxSize);
+    if (!fullname)
+        return 1;
+    if (maxSize != 0)
+    {
+        Mfree(fullname);
+        return 1;
+    }
+    _PathPostfix(fullname);
+
+    realpath = DirManagerPathConcat(sd->server->basePath, fullname);
+    remove(realpath);
+    pthread_rwlock_wrlock(sd->svrRwLock);
+    FileTreeDeInit(sd->ft);
+    FileTreeInit(sd->ft);
+    FileTreeSetBasePath(sd->ft, sd->server->basePath);
+    r = FileTreeScan(sd->ft);
+    if (r)
+        *(sd->stopping) = 1;
+    else
+    {
+        FileTreeComputeCRC32(sd->ft);
+        *(sd->generation) += 1;
+    }
+    pthread_rwlock_unlock(sd->svrRwLock);
+
+    Mfree(realpath);
+    Mfree(fullname);
+
+    NetwProtUInt32ToBuf(buf, mn);
+    NetwProtSetSM(&res, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, sizeof(buf), buf);
+    return NetwProtSendTo(sd->clientSocket, &res);
+}
+
+static int _ServerProtocolRequestHandler_FileCreatedFromClient(void **args)
+{
+    struct stat s;
+    SocketMessage_t res;
+    struct timeval tv;
+    char buftmp[16];
+    char *fullname;
+    char *realpath;
+    char *temppath;
+    unsigned char *ptr;
+    size_t maxSize;
+    ServingData_t *sd = args[0];
+    SocketMessage_t *sm = args[1];
+    uint32_t g;
+    uint32_t mn = 0;
+    unsigned char buf[sizeof(mn)];
+    int r;
+
+    ptr = sm->message;
+    maxSize = sm->messageLength;
+
+    NetwProtBufToUInt32(ptr, &g);
+    ptr += sizeof(g);
+    maxSize -= sizeof(g);
+    fullname = MReadString((void **)&ptr, &maxSize);
+    if (!fullname)
+        return 1;
+    _PathPostfix(fullname);
+
+    realpath = DirManagerPathConcat(sd->server->basePath, fullname);
+    r = stat(realpath, &s);
+
+    while (r == 0)
+    {
+        temppath = SConcat(realpath, "-conflict");
+        Mfree(realpath);
+        realpath = temppath;
+        r = stat(realpath, &s);
+    }
+    NetwProtUInt32ToBuf(buf, mn);
+    NetwProtSetSM(&res, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, sizeof(buf), buf);
+    r = NetwProtSendTo(sd->clientSocket, &res);
+
+    sprintf(buftmp, "%u", (unsigned int)((size_t)&s));
+    temppath = DirManagerPathConcat(sd->server->workingFolder, buftmp);
+    _SetTimeout(&tv, NETWPROT_READ_TIMEOUT_IN_SECOND);
+    r = NetwProtRecvFile(sd->clientSocket, temppath, &tv);
+    if (r == 0)
+    {
+        pthread_rwlock_wrlock(sd->svrRwLock);
+        r = rename(temppath, realpath);
+        if (r == 0)
+        {
+            FileTreeDeInit(sd->ft);
+            FileTreeInit(sd->ft);
+            FileTreeSetBasePath(sd->ft, sd->server->basePath);
+            r = FileTreeScan(sd->ft);
+            if (r)
+                *(sd->stopping) = 1;
+            else
+            {
+                FileTreeComputeCRC32(sd->ft);
+                *(sd->generation) += 1;
+            }
+        }
+        else
+            *(sd->stopping) = 1;
+        pthread_rwlock_unlock(sd->svrRwLock);
+    }
+
+    Mfree(temppath);
+    Mfree(realpath);
+    Mfree(fullname);
+    return r;
+}
+
+static int _ServerProtocolRequestHandler_FileRequestFromClient(void **args)
+{
+    struct stat s;
+    SocketMessage_t res;
+    char *fullname;
+    char *realpath;
+    unsigned char *ptr;
+    size_t maxSize;
+    ServingData_t *sd = args[0];
+    SocketMessage_t *sm = args[1];
+    uint32_t g;
+    uint32_t mn = 0;
+    unsigned char buf[sizeof(mn)];
+    int r;
+
+    ptr = sm->message;
+    maxSize = sm->messageLength;
+
+    NetwProtBufToUInt32(ptr, &g);
+    ptr += sizeof(g);
+    maxSize -= sizeof(g);
+    fullname = MReadString((void **)&ptr, &maxSize);
+    if (!fullname)
+        return 1;
+    if (maxSize != 0)
+    {
+        Mfree(fullname);
+        return 1;
+    }
+    _PathPostfix(fullname);
+
+    realpath = DirManagerPathConcat(sd->server->basePath, fullname);
+    r = stat(realpath, &s);
+    if (r)
+        mn = 1;
+
+    NetwProtUInt32ToBuf(buf, mn);
+    NetwProtSetSM(&res, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, sizeof(buf), buf);
+    r = NetwProtSendTo(sd->clientSocket, &res);
+    if (r || mn)
+    {
+        Mfree(realpath);
+        Mfree(fullname);
+        return 1;
+    }
+    r = NetwProtSendFile(sd->clientSocket, realpath);
+    Mfree(realpath);
+    Mfree(fullname);
+    return r;
+}
+
+static void _PathPostfix(char *pathFromClient)
+{
+    size_t i = 0;
+
+    while (pathFromClient[i] != '\0')
+    {
+#ifdef _WIN32
+        if (pathFromClient[i] == '/')
+            pathFromClient[i] = '\\';
+#else
+        if (pathFromClient[i] == '\\')
+            pathFromClient[i] = '/';
+#endif
+        i += 1;
+    }
+}
+
+static int _ServerProtocolRequestHandler_FileChangedFromClient(void **args)
+{
+    struct stat s;
+    SocketMessage_t res;
+    struct timeval tv;
+    char buftmp[16];
+    char *fullname;
+    char *realpath;
+    char *temppath;
+    unsigned char *ptr;
+    size_t maxSize;
+    ServingData_t *sd = args[0];
+    SocketMessage_t *sm = args[1];
+    uint32_t g;
+    uint32_t mn = 0;
+    unsigned char buf[sizeof(mn)];
+    int r;
+
+    ptr = sm->message;
+    maxSize = sm->messageLength;
+
+    NetwProtBufToUInt32(ptr, &g);
+    ptr += sizeof(g);
+    maxSize -= sizeof(g);
+    if (g != *(sd->generation))
+    {
+        mn = 2;
+        NetwProtUInt32ToBuf(buf, mn);
+        NetwProtSetSM(&res, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, sizeof(buf), buf);
+        NetwProtSendTo(sd->clientSocket, &res);
+        return 1;
+    }
+    fullname = MReadString((void **)&ptr, &maxSize);
+    if (!fullname)
+        return 1;
+    _PathPostfix(fullname);
+
+    realpath = DirManagerPathConcat(sd->server->basePath, fullname);
+    r = stat(realpath, &s);
+
+    if (r)
+        mn = 1;
+    NetwProtUInt32ToBuf(buf, mn);
+    NetwProtSetSM(&res, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, sizeof(buf), buf);
+    r = NetwProtSendTo(sd->clientSocket, &res);
+    if (mn)
+    {
+        Mfree(realpath);
+        Mfree(fullname);
+        return 1;
+    }
+
+    sprintf(buftmp, "%u", (unsigned int)((size_t)&s));
+    temppath = DirManagerPathConcat(sd->server->workingFolder, buftmp);
+    _SetTimeout(&tv, NETWPROT_READ_TIMEOUT_IN_SECOND);
+    r = NetwProtRecvFile(sd->clientSocket, temppath, &tv);
+    if (r == 0)
+    {
+        pthread_rwlock_wrlock(sd->svrRwLock);
+        remove(realpath);
+        r = rename(temppath, realpath);
+        if (r == 0)
+        {
+            FileTreeDeInit(sd->ft);
+            FileTreeInit(sd->ft);
+            FileTreeSetBasePath(sd->ft, sd->server->basePath);
+            r = FileTreeScan(sd->ft);
+            if (r)
+                *(sd->stopping) = 1;
+            else
+            {
+                FileTreeComputeCRC32(sd->ft);
+                *(sd->generation) += 1;
+            }
+        }
+        else
+            *(sd->stopping) = 1;
+        pthread_rwlock_unlock(sd->svrRwLock);
+    }
+
+    Mfree(temppath);
+    Mfree(realpath);
+    Mfree(fullname);
+    return r;
 }

@@ -11,8 +11,7 @@ void *Mmalloc(size_t s)
 {
     void *p;
 
-    if (pthread_mutex_lock(&_memlock))
-        abort();
+    pthread_mutex_lock(&_memlock);
     p = malloc(s);
     if (!p)
     {
@@ -21,8 +20,7 @@ void *Mmalloc(size_t s)
     }
 
     _gAllocationCount += 1;
-    if (pthread_mutex_unlock(&_memlock))
-        abort();
+    pthread_mutex_unlock(&_memlock);
 
     return p;
 }
@@ -31,39 +29,33 @@ void *Mrealloc(void *p, size_t s)
 {
     void *q;
 
-    if (pthread_mutex_lock(&_memlock))
-        abort();
+    pthread_mutex_lock(&_memlock);
     q = realloc(p, s);
     if (!q)
     {
         fprintf(stderr, _NO_MEM_MSG);
         abort();
     }
-    if (pthread_mutex_unlock(&_memlock))
-        abort();
+    pthread_mutex_unlock(&_memlock);
 
     return q;
 }
 
 void Mfree(void *p)
 {
-    if (pthread_mutex_lock(&_memlock))
-        abort();
+    pthread_mutex_lock(&_memlock);
     free(p);
 
     if (p)
         _gAllocationCount -= 1;
-    if (pthread_mutex_unlock(&_memlock))
-        abort();
+    pthread_mutex_unlock(&_memlock);
 }
 
 size_t MDebug()
 {
     size_t r;
-    if (pthread_mutex_lock(&_memlock))
-        abort();
+    pthread_mutex_lock(&_memlock);
     r = _gAllocationCount;
-    if (pthread_mutex_unlock(&_memlock))
-        abort();
+    pthread_mutex_unlock(&_memlock);
     return r;
 }

@@ -1,6 +1,8 @@
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "mm.h"
 #include "netwprot.h"
@@ -94,9 +96,9 @@ void NetwProtUInt32ToBuf(unsigned char *buf, uint32_t data)
 {
     size_t i;
 
-    for (i = 0; i < sizeof(buf); i += 1)
+    for (i = 0; i < sizeof(data); i += 1)
     {
-        buf[sizeof(buf) - i - 1] = (unsigned char)(data & 0xFF);
+        buf[sizeof(data) - i - 1] = (unsigned char)(data & 0xFF);
         data = (uint32_t)(data >> 8);
     }
 }
@@ -120,6 +122,95 @@ void NetwProtSetSM(SocketMessage_t *sm, uint16_t type, uint32_t length, unsigned
     sm->messageType = type;
     sm->messageLength = length;
     sm->message = mesg;
+}
+
+int NetwProtSendFile(SOCKET s, const char *filepath)
+{
+    unsigned char buf[NETWPROT_FILE_TRANSFER_BUFFER_SIZE];
+    struct stat st;
+    FILE *f;
+    size_t sent, total, expected, actual;
+    int r = 0;
+    uint32_t fileSize;
+
+    r = stat(filepath, &st);
+    if (r)
+        return 1;
+    total = (size_t)st.st_size;
+    fileSize = (uint32_t)total;
+    r = _SendUInt32(s, fileSize);
+    if (r)
+        return r;
+
+    f = fopen(filepath, "rb");
+    if (!f)
+        return 1;
+
+    sent = 0;
+    while (sent < total)
+    {
+        if (sent + sizeof(buf) > total)
+            expected = total - sent;
+        else
+            expected = sizeof(buf);
+        actual = fread(buf, 1, expected, f);
+        if (actual != expected)
+        {
+            r = 1;
+            break;
+        }
+        r = _RawWriteSocket(s, buf, actual);
+        if (r)
+            break;
+        sent += actual;
+    }
+
+    fclose(f);
+    return r;
+}
+
+int NetwProtRecvFile(SOCKET s, const char *savefilepath, struct timeval *timeout)
+{
+    unsigned char *buf;
+    FILE *f;
+    size_t received, total, expected, actual;
+    uint32_t fileSize;
+    int r;
+
+    r = _ReadUint32(s, &fileSize, timeout);
+    if (r)
+        return r;
+    total = (size_t)fileSize;
+
+    f = fopen(savefilepath, "wb");
+    if (!f)
+        return 1;
+
+    received = 0;
+    while (received < total)
+    {
+        if (received + NETWPROT_FILE_TRANSFER_BUFFER_SIZE > total)
+            expected = total - received;
+        else
+            expected = NETWPROT_FILE_TRANSFER_BUFFER_SIZE;
+        buf = _ReadRawData(s, expected, timeout);
+        if (!buf)
+        {
+            fclose(f);
+            return 1;
+        }
+        actual = fwrite(buf, 1, expected, f);
+        Mfree(buf);
+        if (actual != expected)
+        {
+            fclose(f);
+            return 1;
+        }
+        received += actual;
+    }
+
+    fclose(f);
+    return 0;
 }
 
 // ==========================

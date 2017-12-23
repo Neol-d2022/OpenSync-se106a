@@ -16,6 +16,19 @@
 /* TC_t */
 #include "transformcontainer.h"
 
+#define FILENODE_FLAG_IS_DIR 0x00000001
+#define FILENODE_FLAG_CRC_VALID 0x00000002
+#define FILENODE_FLAG_CREATED 0x00000004
+#define FILENODE_FLAG_DELETED 0x00000008
+#define FILENODE_FLAG_MODIFIED 0x00000010
+#define FILENODE_FLAG_MOVED_FROM 0x00000020
+#define FILENODE_FLAG_MOVED_TO 0x00000040
+#define FILENODE_FLAG_VERSION_VALID 0x00000080
+
+#define FLAG_SET(f, x) ((f) |= (x))
+#define FLAG_RESET(f, x) ((f) &= (~(x)))
+#define FLAG_ISSET(f, x) ((f) & (x))
+
 typedef struct
 {
     size_t size;
@@ -92,5 +105,8 @@ void FileNodeDiffRelease(FileNodeDiff_t **diff, size_t len);
 
 /* DEBUG. Print file node difference */
 void FileNodeDiffDebugPrint(FileNodeDiff_t **diff, size_t len);
+
+FileTree_t *FileTreeFromFile(const char *filename, const char *syncdir);
+int FileTreeToFile(const char *filename, FileTree_t *ft);
 
 #endif
