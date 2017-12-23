@@ -16,6 +16,7 @@ typedef struct
 {
     SOCKET serverSocket;
     struct sockaddr_in serverInfo;
+    uint32_t cachedGeneration;
 } ConnectionToServer_t;
 
 static int _CreateWorkingFolder(SynchronizationClient_t *client);
@@ -30,6 +31,7 @@ void *ClientThreadEntry(void *arg)
     ConnectionToServer_t conn;
     SynchronizationClient_t *client = (SynchronizationClient_t *)arg;
 
+    SyncProtUnsetCancelable();
     SyncProtWaitForInitialization(client->sp);
     if (_CreateWorkingFolder(client))
         pthread_exit(NULL);
@@ -89,6 +91,7 @@ static int _CreateConnection(SynchronizationClient_t *client, ConnectionToServer
     }
 
     conn->serverSocket = s;
+    conn->cachedGeneration = 0;
     return 0;
 }
 
@@ -142,7 +145,7 @@ static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, Conne
     FileTree_t *ft;
     unsigned char *ptr;
     size_t sizeCount;
-    uint32_t mn = 0;
+    uint32_t mn = 0, generation;
     unsigned char buf[sizeof(mn)];
     int r;
 
@@ -157,7 +160,7 @@ static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, Conne
     if (r)
         return 1;
 
-    if (sm.messageType != NETWPROT_SM_MESSAGE_TYPE_RESPONSE || sm.messageLength <= sizeof(buf))
+    if (sm.messageType != NETWPROT_SM_MESSAGE_TYPE_RESPONSE || sm.messageLength <= (sizeof(buf) << 1))
     {
         NetwProtFreeSocketMesg(&sm);
         return 1;
@@ -169,12 +172,15 @@ static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, Conne
     NetwProtBufToUInt32(ptr, &mn);
     ptr += sizeof(mn);
     sizeCount += sizeof(mn);
-
     if (mn != NETWPROT_RESPONSE_OK)
     {
         NetwProtFreeSocketMesg(&sm);
         return 1;
     }
+
+    NetwProtBufToUInt32(ptr, &generation);
+    ptr += sizeof(generation);
+    sizeCount += sizeof(generation);
 
     mb.size = sm.messageLength - sizeCount;
     mb.ptr = ptr;
@@ -188,6 +194,7 @@ static int _ClientProtocolFileTreeRequest(SynchronizationClient_t *client, Conne
     Mfree(ft);
 
     NetwProtFreeSocketMesg(&sm);
+    conn->cachedGeneration = generation;
     return 0;
 }
 

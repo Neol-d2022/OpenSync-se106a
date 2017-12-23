@@ -12,5 +12,6 @@ void SyncProtBeforeInitialization(SynchronizationProtocols_t *sp);
 void SyncProtAfterInitialization(SynchronizationProtocols_t *sp);
 void SyncProtWaitForInitialization(SynchronizationProtocols_t *sp);
 int SyncProtSetCancelable(void);
+int SyncProtUnsetCancelable(void);
 
 #endif

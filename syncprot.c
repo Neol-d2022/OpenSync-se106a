@@ -28,3 +28,11 @@ int SyncProtSetCancelable(void)
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldState);
     return oldState;
 }
+
+int SyncProtUnsetCancelable(void)
+{
+    int oldState;
+
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldState);
+    return oldState;
+}

@@ -13,12 +13,14 @@
 #include "xsocket.h"
 
 #define _ACCEPT_CLIENT_INTERVAL_IN_SECOND 4
+#define _GENERATION_FILENAME ".gen"
 
 typedef struct
 {
     FileTree_t ft;
     pthread_rwlock_t svrRwLock;
     pthread_rwlock_t runningLock;
+    uint32_t generation;
     volatile int stopSync;
 
     SOCKET s;
@@ -32,6 +34,7 @@ typedef struct
 
     SynchronizationServer_t *server;
     FileTree_t *ft;
+    uint32_t *generation;
     pthread_rwlock_t *svrRwLock;
     pthread_rwlock_t *runningLock;
     volatile const int *stopping;
@@ -49,6 +52,8 @@ static int _ServerProtocolWaitForRequest(ServingData_t *sd);
 static int _CreateListener_SetUpSocketAndLocks(SynchronizationServer_t *server, Listener_t *listenerInstance, SOCKET s);
 static void _StartAcceptClients_ResetBeforeSelect(struct timeval *tv, fd_set *fset, SOCKET s);
 static void _SetTimeout(struct timeval *tv, unsigned int seconds);
+static void _ReadGeneration(const char *filename, uint32_t *generation);
+static int _WriteGeneration(const char *filename, const uint32_t *generation);
 
 static int _ServerProtocolRequestHandler_KeepAlive(void **args);
 static int _ServerProtocolRequestHandler_FileTree(void **args);
@@ -67,6 +72,7 @@ void *ServerThreadEntry(void *arg)
     SynchronizationServer_t *server = (SynchronizationServer_t *)arg;
     Listener_t l;
 
+    SyncProtUnsetCancelable();
     SyncProtWaitForInitialization(server->sp);
     if (_CreateWorkingFolder(server))
         pthread_exit(NULL);
@@ -104,7 +110,9 @@ static int _CreateWorkingFolder(SynchronizationServer_t *server)
 
 static int _CreateListener(SynchronizationServer_t *server, Listener_t *listenerInstance)
 {
+    char *generationFilename;
     SOCKET s;
+    int r;
 
     FileTreeInit(&(listenerInstance->ft));
     FileTreeSetBasePath(&(listenerInstance->ft), server->basePath);
@@ -131,12 +139,18 @@ static int _CreateListener(SynchronizationServer_t *server, Listener_t *listener
     listenerInstance->s = s;
     listenerInstance->server = server;
     listenerInstance->stopSync = 0;
-    return 0;
+    generationFilename = DirManagerPathConcat(server->workingFolder, _GENERATION_FILENAME);
+    _ReadGeneration(generationFilename, &(listenerInstance->generation));
+    r = _WriteGeneration(generationFilename, &(listenerInstance->generation));
+    Mfree(generationFilename);
+
+    return r;
 }
 
 static void _ClearUpListener(void *arg)
 {
     Listener_t *listenerInstance = (Listener_t *)arg;
+    char *generationFilename = DirManagerPathConcat(listenerInstance->server->workingFolder, _GENERATION_FILENAME);
 
     listenerInstance->stopSync = 1;
     pthread_rwlock_wrlock(&(listenerInstance->runningLock));
@@ -145,6 +159,8 @@ static void _ClearUpListener(void *arg)
     pthread_rwlock_destroy(&(listenerInstance->svrRwLock));
     pthread_rwlock_unlock(&(listenerInstance->runningLock));
     pthread_rwlock_destroy(&(listenerInstance->runningLock));
+    _WriteGeneration(generationFilename, &listenerInstance->generation);
+    Mfree(generationFilename);
 }
 
 static void _StartAcceptClients(Listener_t *listenerInstance)
@@ -160,7 +176,9 @@ static void _StartAcceptClients(Listener_t *listenerInstance)
         if (r != 0)
             _HandleIncomingClient(listenerInstance);
 
+        SyncProtSetCancelable();
         pthread_testcancel();
+        SyncProtUnsetCancelable();
         _StartAcceptClients_ResetBeforeSelect(&tv, &fset, s);
     }
 }
@@ -184,6 +202,7 @@ static int _HandleIncomingClient(Listener_t *listenerInstance)
         sd->svrRwLock = &(listenerInstance->svrRwLock);
         sd->runningLock = &(listenerInstance->runningLock);
         sd->stopping = &(listenerInstance->stopSync);
+        sd->generation = &(listenerInstance->generation);
         memcpy(&(sd->clientInfo), &clientInfo, sizeof(clientInfo));
         if (!pthread_create(&servingThread, NULL, _ServingThreadEntry, sd))
         {
@@ -308,23 +327,25 @@ static int _ServerProtocolRequestHandler_FileTree(void **args)
 {
 
     SocketMessage_t sm;
-    MemoryBlock_t mb, bufmb, out;
+    MemoryBlock_t mb, bufmb, bufgmb, out;
     ServingData_t *sd = args[0];
     //SocketMessage_t *sm = args[1];
     uint32_t mn = 0;
     unsigned char buf[sizeof(mn)];
+    unsigned char bufg[sizeof(*(sd->generation))];
     int r;
 
-    if (pthread_rwlock_rdlock(sd->svrRwLock))
-        return 1;
+    pthread_rwlock_rdlock(sd->svrRwLock);
     FileTreeToMemoryblock(sd->ft, &mb);
-    if (pthread_rwlock_unlock(sd->svrRwLock))
-        return 1;
+    NetwProtUInt32ToBuf(bufg, *(sd->generation));
+    pthread_rwlock_unlock(sd->svrRwLock);
 
     NetwProtUInt32ToBuf(buf, mn);
     bufmb.size = sizeof(buf);
     bufmb.ptr = buf;
-    MMConcat(&out, 2, &bufmb, &mb);
+    bufgmb.size = sizeof(bufg);
+    bufgmb.ptr = bufg;
+    MMConcat(&out, 3, &bufmb, &bufgmb, &mb);
     MBfree(&mb);
 
     NetwProtSetSM(&sm, NETWPROT_SM_MESSAGE_TYPE_RESPONSE, out.size, out.ptr);
@@ -369,4 +390,40 @@ static void _SetTimeout(struct timeval *tv, unsigned int seconds)
 {
     memset(tv, 0, sizeof(*tv));
     tv->tv_sec = seconds;
+}
+
+static void _ReadGeneration(const char *filename, uint32_t *generation)
+{
+    unsigned char *p = (unsigned char *)generation;
+    FILE *f;
+    size_t n = sizeof(*generation), r;
+
+    f = fopen(filename, "rb");
+    if (!f)
+    {
+        *generation = 0;
+        return;
+    }
+
+    r = fread(p, n, 1, f);
+    fclose(f);
+
+    if (r != 1)
+        *generation = 0;
+
+    return;
+}
+
+static int _WriteGeneration(const char *filename, const uint32_t *generation)
+{
+    const unsigned char *p = (const unsigned char *)generation;
+    FILE *f;
+    size_t n = sizeof(*generation), w;
+
+    f = fopen(filename, "wb");
+    if (!f)
+        return 1;
+    w = fwrite(p, n, 1, f);
+    fclose(f);
+    return (w == 1) ? 0 : 1;
 }
