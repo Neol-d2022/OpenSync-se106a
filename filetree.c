@@ -770,6 +770,7 @@ static FileNode_t *_FileNodeFromMemoryBlock(FileNode_t *parent, const char *pare
             {
                 fn->folder.childrenLen = i;
                 _FileNodeTraverse(fn, NULL, _DestoryFileNode);
+                Mfree(fn);
                 return NULL;
             }
             (fn->folder.children)[i] = child;
