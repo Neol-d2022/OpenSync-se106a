@@ -1,32 +1,35 @@
 CC = gcc
 
-INCLUDE_DIR = ./Include/
+INCLUDE_DIR = Include
+SOURCE_DIR = Source
+RELEASE_DIR = Release
 
 INCLUDE := -I $(INCLUDE_DIR)
-SOURCE := ./Source/
+SOURCES := $(wildcard $(SOURCE_DIR)/*.c)
 
 CFLAGS := -Wall -Wextra -g3 -c
-LFLAGS :=
+LFLAGS := 
 
-OBJS = client.o configurer.o configurer_test.o crc32.o dirmanager.o filetree.o filetree_test.o main.o mb.o mm.o mm_test.o netwprot.o server.o strings.o strings_test.o syncprot.o transformcontainer.o xsocket.o
-DEPS = childthreads.h client.h configurer.h configurer_test.h crc32.h dirmanager.h filetree.h filetree_test.h mb.h mm.h mm_test.h netwprot.h server.h strings.h strings_test.h syncprot.h transformcontainer.h xsocket.h
 LIBS = -lm -lpthread
 ifeq ($(OS),Windows_NT)
 	LIBS += -lws2_32
 endif
 
-BIN = OpenSync
+OBJS = client.o configurer.o configurer_test.o crc32.o dirmanager.o filetree.o filetree_test.o main.o mb.o mm.o mm_test.o netwprot.o server.o strings.o strings_test.o syncprot.o transformcontainer.o xsocket.o
 
-#$(INCLUDE_DIR)%.h
+TARGET = OpenSync
 
-%.o: $(SOURCE)%.c 
-	$(CC) $(CFLAGS) $(INCLUDE) $^ -o $@
+.PHONY: clean
 
-$(BIN): $(OBJS)
-	$(CC) -o $@ $^ $(LFLAGS) $(LIBS)
+$(TARGET): $(OBJS)
+	@cd Source
+	$(CC) $(INCLUDE) $(LFLAGS) $^ -o $(RELEASE_DIR)/$@ $(LIBS)
 
-clean:
-	rm -f $(OBJS) $(BIN)
+%.o: $(SOURCE_DIR)/%.c
+	$(CC) $(INCLUDE) $(CFLAGS) $^ -o $(SOURCE_DIR)/$@ 
+
+clean: 
+	rm -f $(RELEASE_DIR)/$(TARGET) $(OBJS) 
 
 test:
 	./OpenSync
