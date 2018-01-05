@@ -26,7 +26,7 @@ $(TARGET): $(OBJS)
 	$(CC) $(INCLUDE) $(LFLAGS) $^ -o $(RELEASE_DIR)/$@ $(LIBS)
 
 %.o: $(SOURCE_DIR)/%.c
-	$(CC) $(INCLUDE) $(CFLAGS) $^ -o $(SOURCE_DIR)/$@ 
+	$(CC) $(INCLUDE) $(CFLAGS) $^ -o $@ 
 
 clean: 
 	rm -f $(RELEASE_DIR)/$(TARGET) $(OBJS) 
