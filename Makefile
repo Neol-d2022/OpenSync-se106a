@@ -2,7 +2,6 @@ CC = gcc
 
 INCLUDE_DIR = Include
 SOURCE_DIR = Source
-RELEASE_DIR = Release
 
 INCLUDE := -I $(INCLUDE_DIR)
 SOURCES := $(wildcard $(SOURCE_DIR)/*.c)
@@ -23,13 +22,13 @@ TARGET = OpenSync
 
 $(TARGET): $(OBJS)
 	@cd Source
-	$(CC) $(INCLUDE) $(LFLAGS) $^ -o $(RELEASE_DIR)/$@ $(LIBS)
+	$(CC) $(INCLUDE) $(LFLAGS) $^ -o $@ $(LIBS)
 
 %.o: $(SOURCE_DIR)/%.c
 	$(CC) $(INCLUDE) $(CFLAGS) $^ -o $@ 
 
 clean: 
-	rm -f $(RELEASE_DIR)/$(TARGET) $(OBJS) 
+	rm -f $(TARGET) $(OBJS) 
 
 test:
 	./OpenSync
