@@ -23,6 +23,7 @@ TARGET = OpenSync
 $(TARGET): $(OBJS)
 	@cd Source
 	$(CC) $(INCLUDE) $(LFLAGS) $^ -o $@ $(LIBS)
+	@rm *.o
 
 %.o: $(SOURCE_DIR)/%.c
 	$(CC) $(INCLUDE) $(CFLAGS) $^ -o $@ 
