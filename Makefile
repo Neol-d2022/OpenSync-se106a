@@ -21,7 +21,6 @@ TARGET = OpenSync
 .PHONY: clean
 
 $(TARGET): $(OBJS)
-	@cd Source
 	$(CC) $(INCLUDE) $(LFLAGS) $^ -o $@ $(LIBS)
 	@rm *.o
 
